@@ -1,6 +1,7 @@
 package com.conversive.aep.support;
 
 import com.conversive.aep.definition.model.DefinitionCodec;
+import com.conversive.aep.definition.model.WorkflowDefinition;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.io.IOException;
 import java.io.InputStream;
@@ -29,5 +30,9 @@ public final class Fixtures {
 
     public static JsonNode pdfExample() {
         return DefinitionCodec.readTree(pdfExampleJson());
+    }
+
+    public static WorkflowDefinition pdfExampleDefinition() {
+        return DefinitionCodec.parse(pdfExample());
     }
 }
