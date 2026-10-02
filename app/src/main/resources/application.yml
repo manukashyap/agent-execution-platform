@@ -1,0 +1,49 @@
+spring:
+  application:
+    name: aep
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: ${AEP_DB_URL:jdbc:postgresql://localhost:5432/aep}
+    username: ${AEP_DB_USER:aep}
+    password: ${AEP_DB_PASSWORD:aep}
+  flyway:
+    locations: classpath:db/migration
+  docker:
+    compose:
+      enabled: true
+      file: compose.yml
+      lifecycle-management: start-only
+      profiles:
+        active: lite
+      skip:
+        in-tests: true
+
+server:
+  port: ${AEP_PORT:8000}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,flyway
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+aep:
+  temporal:
+    target: ${AEP_TEMPORAL_TARGET:localhost:7233}
+    namespace: ${AEP_TEMPORAL_NAMESPACE:default}
+    task-queue: ${AEP_TEMPORAL_TASK_QUEUE:aep-main}
+    start-worker: true
+  outbound:
+    connect-timeout: 2s
+    allow-hosts: ${AEP_OUTBOUND_ALLOW_HOSTS:localhost:8090,mocks:8090}
+    self-hosts: ${AEP_OUTBOUND_SELF_HOSTS:localhost:8000,app:8000}
+  tenancy:
+    dev:
+      dev-api-key: ${AEP_DEV_API_KEY:}
+      other-api-key: ${AEP_DEV_OTHER_API_KEY:}
