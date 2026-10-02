@@ -5,6 +5,10 @@ All numbers below come from the runs stored under `loadtest/results/` (k6 summar
 **not measured**. This is a single-laptop, single-node stack, so absolute numbers are a floor for a real
 deployment; the shape of the saturation and the per-execution costs are the useful part.
 
+> **Client caveat.** These runs were captured at 0fa7dc3, before outbound HTTP moved from `java.net.http` to Apache
+> HttpClient 5 (796f2f8, DNS pinning) and before the pool sizing and per-call deadline fixes. They have not been
+> re-run on the current client. Temporal server metrics were not captured (`prom-temporal_sched_to_start_p95.json` is empty).
+
 ## Reproduce
 
 ```bash
@@ -39,20 +43,20 @@ latency 100-500 ms per provider (router defaults).
 |---|---|
 | Offered / admitted | 25,741 executions in 350 s (avg 73.5/s, peak minute 131/s by `created_at`); 100% HTTP 2xx |
 | Admission API latency (`POST /executions`) | all tenants p50 38 ms, p95 247 ms, p99 620 ms, max 1.41 s; heavy p95 260 ms, light p95 164 ms |
-| **Sustained completion throughput** | **about 22 executions/s** (minutes 14:02-14:06 UTC avg 22.4/s; best minute 26.7/s) = about 270 node runs/s |
+| **Sustained completion throughput** | **about 22 executions/s while draining** (minutes 14:02-14:06 UTC, after admissions stopped: avg 22.4/s; best minute 26.7/s) = about 270 node runs/s. Under peak admission it was lower: 11.7-12.7/s in the two busiest admission minutes (14:00-14:01, 131 and 106 admitted/s); see `completions-per-minute.txt` |
 | Backlog | `queue_depth` (`temporal_workflow` and `admission_queued`) peaked at 18,172 at t+355 s; `temporal_activity` peaked at 19,736 during the drain; 300 s drain window ended with about 12 k executions still live |
 | Schedule-to-start (app histogram) | mean up to 48.9 s, p95 up to 277 s (p95 is bucket-interpolated, treat as order of magnitude) |
 | End-to-end latency, heavy (completed only) | SUCCEEDED p50 80 s, p95 324 s, p99 385 s (n = 7,673) |
 | End-to-end latency, light (completed only) | SUCCEEDED p50 0.36 s, p95 1.6-2.4 s, p99 8.6 s (n = 481 / 483 of 1,751 each) |
 | Outcome of 25,741 | heavy 22,239: 7,673 SUCCEEDED, 4,452 FAILED, 7,826 QUEUED, 2,288 RUNNING at capture; light 1,751 each: ~482 SUCCEEDED, ~100 FAILED, ~1,165 QUEUED |
-| Failure mode | all FAILED are `TIMEOUT`: activity `ScheduleToStart` expired while the backlog was waiting (not an app bug) |
+| Failure mode | the FAILED executions timed out while their activity tasks waited in the backlog. The expiring timeout is the activity **ScheduleToClose** (`NodeActivityOptions` sets StartToClose and ScheduleToClose; no ScheduleToStart is set). The capture has no `error_code` breakdown, so the split by code is **not measured** |
 
 Low-load calibration (`results/calibration/`, 851 executions at about 9.5/s, nothing queued): e2e p50 0.25-0.26 s,
 p95 0.55-0.73 s, p99 1.07-1.71 s, all 851 SUCCEEDED. That is the latency of the engine when it is not saturated.
 
 CPU and memory (`docker stats` average over the steady saturated window, t+240..353 s; CPU in % of one core):
 
-| Container | CPU avg (max) | Memory max |
+| Container | CPU avg (max), t+240..353 s | Memory max (whole run) |
 |---|---|---|
 | app | 109% (139%) | 1.33 GiB |
 | postgres (app DB + both Temporal DBs) | 252% (290%) | 948 MiB |
@@ -121,9 +125,9 @@ So the dominant cost is Temporal's own persistence (about 75% of row writes), no
 Heap tuples only (index writes are extra, not counted). The saturation run shows the same ratios (app 14 ins/10 upd per
 admitted execution, since most were unfinished).
 
-## Extrapolation to 500 executions/s (linear, from the saturation run; not measured)
+## Extrapolation to 500 executions/s (linear; not measured)
 
-Measured cost per execution at 22.4/s: Postgres 0.11 core-s, Temporal 0.12 core-s, app 0.05 core-s (about 0.3 core-s total
+Cost per execution, dividing the saturated-window CPU (t+240..353 s) by the drain throughput (22.4/s), so mixing two windows: Postgres 0.11 core-s, Temporal 0.12 core-s, app 0.05 core-s (about 0.3 core-s total
 excluding mocks). At 500/s (22x):
 
 - CPU: about 56 Postgres cores, about 59 Temporal cores, about 24 app cores. Not reachable on one node.
