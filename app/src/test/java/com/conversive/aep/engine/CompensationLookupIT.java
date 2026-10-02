@@ -28,6 +28,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
@@ -35,6 +36,7 @@ import org.springframework.test.context.DynamicPropertySource;
  * A LOOKUP forward (crm.upsert) interrupted mid-call leaves a PENDING row; the saga must ask the provider
  * (crm.get) whether the effect landed and delete the contact, not assume it did not.
  */
+@ActiveProfiles("dev")
 @Import(InProcessTemporal.class)
 class CompensationLookupIT extends PostgresIntegrationTest {
 
