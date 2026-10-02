@@ -157,6 +157,18 @@ class LedgerSideEffectGuardIT extends LedgerTestSupport {
     }
 
     @Test
+    void neverSentRequestReleasesTheRowBecauseNothingLeftTheProcess() {
+        EffectSpec spec = forward(1, IdempotencyMode.NONE, START_TO_CLOSE);
+
+        assertThatThrownBy(() -> guard.run(spec, key -> {
+            throw new RetryableError(ErrorCodes.UPSTREAM_NOT_SENT, "no pooled connection");
+        })).isInstanceOfSatisfying(RetryableError.class,
+                e -> assertThat(e.code()).isEqualTo(ErrorCodes.UPSTREAM_NOT_SENT));
+
+        assertThat(ledger.find(spec.tenantId(), spec.key())).isEmpty();
+    }
+
+    @Test
     void lookupModeCommitsAnEffectFoundByLookupWithoutCallingAgain() {
         EffectSpec attempt1 = spec("crm", Phase.FORWARD, 1, IdempotencyMode.LOOKUP,
                 START_TO_CLOSE);

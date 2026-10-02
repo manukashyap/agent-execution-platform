@@ -31,6 +31,8 @@ public final class ErrorCodes {
     public static final String UPSTREAM_RATE_LIMITED = "UPSTREAM_RATE_LIMITED";
     public static final String UPSTREAM_CLIENT_ERROR = "UPSTREAM_CLIENT_ERROR";
     public static final String UPSTREAM_IO = "UPSTREAM_IO";
+    /** The request never left this process (no pooled connection became free in time); retrying cannot duplicate it. */
+    public static final String UPSTREAM_NOT_SENT = "UPSTREAM_NOT_SENT";
     public static final String EGRESS_DENIED = "EGRESS_DENIED";
     public static final String NO_PROVIDER_AVAILABLE = "NO_PROVIDER_AVAILABLE";
     public static final String LLM_UNAVAILABLE = "LLM_UNAVAILABLE";

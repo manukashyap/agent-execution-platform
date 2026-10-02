@@ -134,12 +134,13 @@ public class LedgerSideEffectGuard implements SideEffectGuard {
         if (error instanceof NonRetryableError) {
             ledger.markFailed(spec.tenantId(), spec.key(), spec.attempt(), now);
         } else if (error instanceof RetryableError retryable) {
-            boolean rateLimited = ErrorCodes.UPSTREAM_RATE_LIMITED.equals(retryable.code());
-            // A 429 proves only that this call did nothing; after a takeover an earlier attempt's call may have
-            // landed, so the row must survive for compensation and the lease is merely ended.
-            if (rateLimited && createdRow) {
+            boolean notSent = ErrorCodes.UPSTREAM_RATE_LIMITED.equals(retryable.code())
+                    || ErrorCodes.UPSTREAM_NOT_SENT.equals(retryable.code());
+            // A 429 or a never-sent request proves only that this call did nothing; after a takeover an earlier
+            // attempt's call may have landed, so the row must survive for compensation and the lease is merely ended.
+            if (notSent && createdRow) {
                 ledger.release(spec.tenantId(), spec.key(), spec.attempt());
-            } else if (rateLimited || ErrorCodes.UPSTREAM_UNAVAILABLE.equals(retryable.code())) {
+            } else if (notSent || ErrorCodes.UPSTREAM_UNAVAILABLE.equals(retryable.code())) {
                 ledger.expireLease(spec.tenantId(), spec.key(), spec.attempt(), now);
             }
         }

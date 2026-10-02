@@ -31,6 +31,7 @@ import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuil
 import org.apache.hc.client5.http.protocol.HttpClientContext;
 import org.apache.hc.core5.http.ClassicHttpRequest;
 import org.apache.hc.core5.http.ClassicHttpResponse;
+import org.apache.hc.core5.http.ConnectionRequestTimeoutException;
 import org.apache.hc.core5.http.ContentType;
 import org.apache.hc.core5.http.Header;
 import org.apache.hc.core5.http.ParseException;
@@ -55,6 +56,7 @@ public class OutboundClient {
     private final EgressPolicy policy;
     private final ObjectMapper mapper;
     private final Clock clock;
+    private final Duration connectionRequestTimeout;
     /** Whether the request sent on this thread targets an allow-listed host; the client connects on the caller's thread. */
     private final ThreadLocal<Boolean> allowListed = new ThreadLocal<>();
 
@@ -68,6 +70,8 @@ public class OutboundClient {
         this.http = HttpClients.custom()
                 .setConnectionManager(PoolingHttpClientConnectionManagerBuilder.create()
                         .setDnsResolver(new ValidatingDnsResolver())
+                        .setMaxConnTotal(properties.maxConnTotal())
+                        .setMaxConnPerRoute(properties.maxConnPerRoute())
                         .setDefaultConnectionConfig(ConnectionConfig.custom()
                                 .setConnectTimeout(Timeout.of(properties.connectTimeout())).build())
                         .build())
@@ -77,6 +81,7 @@ public class OutboundClient {
                 .build();
         this.mapper = mapper;
         this.clock = clock;
+        this.connectionRequestTimeout = properties.connectionRequestTimeout();
     }
 
     /** The client's only DNS lookup: resolves once and rejects non-public answers unless the target is allow-listed. */
@@ -118,11 +123,13 @@ public class OutboundClient {
         HttpClientContext context = HttpClientContext.create();
         context.setRequestConfig(RequestConfig.custom()
                 .setResponseTimeout(Timeout.of(request.timeout()))
-                .setConnectionRequestTimeout(Timeout.of(request.timeout()))
+                .setConnectionRequestTimeout(Timeout.of(connectionRequestTimeout))
                 .build());
         allowListed.set(exempt);
         try {
             return http.execute(toHttpRequest(request), context, OutboundClient::readResponse);
+        } catch (ConnectionRequestTimeoutException e) {
+            throw new RetryableError(ErrorCodes.UPSTREAM_NOT_SENT, "no free connection to " + host, null, e);
         } catch (InterruptedIOException e) {
             throw new RetryableError(ErrorCodes.UPSTREAM_TIMEOUT, "timeout calling " + host, null, e);
         } catch (IOException e) {
