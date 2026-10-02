@@ -43,6 +43,9 @@ aep:
     connect-timeout: 2s
     allow-hosts: ${AEP_OUTBOUND_ALLOW_HOSTS:localhost:8090,mocks:8090}
     self-hosts: ${AEP_OUTBOUND_SELF_HOSTS:localhost:8000,app:8000}
+  tools:
+    mcp-url: ${AEP_MOCKS_BASE_URL:http://localhost:8090}/mcp
+    dev-credential: ${AEP_TOOL_DEV_CREDENTIAL:}
   tenancy:
     dev:
       dev-api-key: ${AEP_DEV_API_KEY:}
