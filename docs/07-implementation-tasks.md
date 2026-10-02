@@ -320,8 +320,8 @@ Each cut = one README line + its design-doc section, committed as `docs: cut <it
 | P6 ★ | D2·4 | 0.75 | ☐ | ☐ Checkpoint B | |
 | P7 | D2·5 | 0.75 | ☐ | ☐ | |
 | P8 | D2·6 | 0.50 | ☐ | ☐ | |
-| P9 ★ | D2·7 | 1.00 | ☐ | ☐ | |
-| P10 ★ | D2·8 | 1.00 | 🟡 | ☐ Release DoD | T10.2 `docs/architecture.svg` ✅; T10.4 `WorkflowReplayIT` (2 recorded histories) ✅; design.pdf, README, fresh-clone check pending |
+| P9 ★ | D2·7 | 1.00 | ✅ | ✅ | `loadtest/run.sh` + `capture.sh`; RESULTS.md: ≈22 exec/s sustained (M4 laptop), first bottleneck Temporal + its Postgres; SideEffectEngineIT 5/5 flake runs |
+| P10 ★ | D2·8 | 1.00 | 🟡 | ☐ Release DoD | T10.2 `docs/architecture.svg` ✅; T10.4 `WorkflowReplayIT` (2 recorded histories) ✅; T10.3 README ✅; design.pdf, fresh-clone check pending |
 | **Total** | | **16.00** | | | |
 
 ---

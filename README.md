@@ -107,6 +107,8 @@ Each prints its own checks. All need `AEP_DEV_API_KEY` set to the key the app wa
 
 The mocks expose `/admin/*` hooks (latency, fail rate, rate limit, drop connection, reset, call counts) that these scripts drive.
 
+**Load test.** `./loadtest/run.sh` brings up the `full` + `app` profiles (project `aeplt`), seeds 3 tenants with raised limits, runs the k6 ramp (about 10 min) and writes captures under `loadtest/out/`; `./loadtest/run.sh down` removes the stack. Method, numbers and the 10× plan are in [loadtest/RESULTS.md](loadtest/RESULTS.md).
+
 ## Assumptions
 
 Collected from [docs/06](docs/06-execution-plan.md), [docs/design.md](docs/design.md) and [docs/ai-usage.md](docs/ai-usage.md); each is a deliberate choice, not an oversight.
