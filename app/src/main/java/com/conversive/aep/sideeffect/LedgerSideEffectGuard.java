@@ -48,7 +48,7 @@ public class LedgerSideEffectGuard implements SideEffectGuard {
             Instant now = clock.instant();
             Instant lease = spec.leaseUntil(now);
             if (ledger.insertPending(spec, lease, now)) {
-                return invokeAndCommit(spec, call, lease);
+                return invokeAndCommit(spec, call, lease, true);
             }
             Optional<JsonNode> result = ledger.find(spec.tenantId(), spec.key())
                     .flatMap(row -> resume(spec, call, row, now, lease));
@@ -102,7 +102,7 @@ public class LedgerSideEffectGuard implements SideEffectGuard {
             }
         }
         // NATIVE_KEY (or LOOKUP found nothing): re-call with the same key; the provider returns the original result.
-        return invokeAndCommit(spec, call, lease);
+        return invokeAndCommit(spec, call, lease, false);
     }
 
     private Optional<JsonNode> lookup(EffectSpec spec, EffectCall call) {
@@ -114,17 +114,18 @@ public class LedgerSideEffectGuard implements SideEffectGuard {
         }
     }
 
-    private JsonNode invokeAndCommit(EffectSpec spec, EffectCall call, Instant lease) {
+    /** {@code createdRow}: this attempt inserted the row, so no earlier call with this key can have landed. */
+    private JsonNode invokeAndCommit(EffectSpec spec, EffectCall call, Instant lease, boolean createdRow) {
         JsonNode response;
         try {
             response = call.invoke(spec.key().value());
         } catch (RuntimeException e) {
-            throw onCallFailure(spec, lease, e);
+            throw onCallFailure(spec, lease, createdRow, e);
         }
         return commit(spec, call, response);
     }
 
-    private RuntimeException onCallFailure(EffectSpec spec, Instant lease, RuntimeException error) {
+    private RuntimeException onCallFailure(EffectSpec spec, Instant lease, boolean createdRow, RuntimeException error) {
         Instant now = clock.instant();
         if (providerInFlight(error)) {
             return new RetryableError(ErrorCodes.EFFECT_IN_PROGRESS,
@@ -133,9 +134,12 @@ public class LedgerSideEffectGuard implements SideEffectGuard {
         if (error instanceof NonRetryableError) {
             ledger.markFailed(spec.tenantId(), spec.key(), spec.attempt(), now);
         } else if (error instanceof RetryableError retryable) {
-            if (ErrorCodes.UPSTREAM_RATE_LIMITED.equals(retryable.code())) {
+            boolean rateLimited = ErrorCodes.UPSTREAM_RATE_LIMITED.equals(retryable.code());
+            // A 429 proves only that this call did nothing; after a takeover an earlier attempt's call may have
+            // landed, so the row must survive for compensation and the lease is merely ended.
+            if (rateLimited && createdRow) {
                 ledger.release(spec.tenantId(), spec.key(), spec.attempt());
-            } else if (ErrorCodes.UPSTREAM_UNAVAILABLE.equals(retryable.code())) {
+            } else if (rateLimited || ErrorCodes.UPSTREAM_UNAVAILABLE.equals(retryable.code())) {
                 ledger.expireLease(spec.tenantId(), spec.key(), spec.attempt(), now);
             }
         }
