@@ -7,6 +7,7 @@
 #
 # Prerequisites: the mocks on :8090 and the app on :8000 with the `dev` profile
 # (`./gradlew :app:bootRun`, which defaults to dev). Needs curl; jq is used for compact output if present.
+# Env: APP or BASE_URL (app), MOCKS or MOCKS_URL (mocks), RATE, BASELINE_S, SLOW_S, RECOVER_S, POLL_S.
 #
 # Why RATE defaults to 50 req/s: a window counts only with >= 20 samples. While DEGRADED, vLLM gets
 # every 20th request, so recovery needs 20 probes per 10 s window: 20 / (0.05 * 10 s) = 40 req/s.
@@ -17,8 +18,8 @@
 # ~60 s back at 100 ms (HEALTHY after 3 fast probe windows, ~30-40 s).
 set -euo pipefail
 
-APP="${APP:-http://localhost:8000}"
-MOCKS="${MOCKS:-http://localhost:8090}"
+APP="${APP:-${BASE_URL:-http://localhost:8000}}"
+MOCKS="${MOCKS:-${MOCKS_URL:-http://localhost:8090}}"
 RATE="${RATE:-50}"
 BASELINE_S="${BASELINE_S:-15}"
 SLOW_S="${SLOW_S:-60}"
