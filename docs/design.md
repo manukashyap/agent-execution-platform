@@ -149,7 +149,7 @@ Unbounded-loop sources (fan-out, retries, tool loop, self-triggering via the SSR
 
 ## 12. Security [P]
 
-- **SSRF:** `OutboundClient` denies private ranges, metadata IPs and the platform's own host; only allow-listed mock hosts bypass. Known gap: the HTTP client re-resolves DNS on connect, so IP pinning against rebinding is [D], as are per-tenant allow-lists.
+- **SSRF:** `OutboundClient` denies private ranges, metadata IPs and the platform's own host; only allow-listed mock hosts bypass. The client resolves each host once, at connect, rejects any non-public answer (one bad address among several denies the host) and connects to exactly those addresses, so DNS rebinding has no window; redirects are not followed. Per-tenant allow-lists are [D].
 - **Tenant scoping:** tenant from the API key; `tenant_id` in every predicate; cross-tenant access is 404. Postgres row-level security is [D].
 - **Keys and secrets:** `api_key.key_hash` stores SHA-256 only; no secrets in code, config, fixtures or history; tool credentials held by the gateway.
 - **Prompt injection via tool output:** tool results are data. Containment is structural: only READ_ONLY allow-listed tools are callable, args are schema-validated and scope-checked, rounds are capped, and tool output returns to the model marked `untrusted` behind a guard message and truncated. Side-effecting tools are unreachable from an LLM.

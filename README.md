@@ -123,7 +123,7 @@ Collected from [docs/06](docs/06-execution-plan.md), [docs/design.md](docs/desig
 - **Budgets:** per-execution cost caps are atomic; the tenant budget is created lazily (default 100 USD, monthly) with no period rollover job. Dry-runs default to a 0.50 USD cap.
 - **Tools:** the LLM may call only `READ_ONLY` tools, at most 1 to 3 per node (`maxToolCalls`); tool output is returned to the model marked untrusted. Side-effecting tools run only through the ledger.
 - **Router:** vLLM is configured without `tools`, so tool-calling turns go to llm-a/llm-b. Healthy providers are scored on configured nominal latency; the half-open recovery rule is our own assumption.
-- **SSRF:** `OutboundClient` is the only outbound HTTP path and enforces an allow-list (`AEP_OUTBOUND_ALLOW_HOSTS`) and a self-host deny-list; DNS pinning against rebinding is deferred.
+- **SSRF:** `OutboundClient` is the only outbound HTTP path and enforces an allow-list (`AEP_OUTBOUND_ALLOW_HOSTS`) and a self-host deny-list; the HTTP client resolves each host once and connects only to the validated addresses (no DNS-rebinding window), and redirects are never followed.
 - **PDF §4 fixture** (`app/src/test/resources/fixtures/pdf-example.json`) is a reconstruction of the assignment example.
 
 ## AI-tool usage
@@ -184,7 +184,7 @@ From design §13, in priority order:
 4. Redis for the limiter and router health (correct across replicas), per tenant x provider buckets.
 5. OTel to Jaeger and a Grafana dashboard.
 6. Temporal fairness verified at 10 k keys.
-7. Row-level security and per-tenant egress allow-lists; pin resolved IPs against DNS rebinding.
+7. Row-level security and per-tenant egress allow-lists.
 8. `EFFECT_KEY_CONFLICT` request-hash check and crash-during-compensation tests.
 9. Month-partitioned audit tables.
 10. Resource leases with fencing tokens for two agents mutating one CRM record.
