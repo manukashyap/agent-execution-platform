@@ -37,6 +37,10 @@ public final class ErrorCodes {
     public static final String INTERNAL = "INTERNAL";
     public static final String VERSION_EXISTS = "VERSION_EXISTS";
     public static final String NOT_IMPLEMENTED = "NOT_IMPLEMENTED";
+    /** The reconciler found the engine run closed while the row was still live and could not tell how it ended. */
+    public static final String ENGINE_RUN_CLOSED = "ENGINE_RUN_CLOSED";
+    /** The reconciler found a live row with no engine run at all (purged or never started). */
+    public static final String ENGINE_RUN_MISSING = "ENGINE_RUN_MISSING";
 
     private ErrorCodes() {
     }

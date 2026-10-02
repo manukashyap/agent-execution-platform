@@ -112,6 +112,30 @@ public class ExecutionRepository {
                 .update() == 1;
     }
 
+    /**
+     * System-wide scan for the reconciler (the only cross-tenant read): RUNNING/COMPENSATING rows untouched since
+     * {@code cutoff}, oldest first. Every follow-up write goes through the tenant-scoped {@link #cas}.
+     */
+    public List<StaleExecution> findStaleLive(Instant cutoff, int limit) {
+        return jdbc.sql("""
+                SELECT tenant_id, id, status
+                  FROM workflow_execution
+                 WHERE status IN ('RUNNING', 'COMPENSATING') AND updated_at < :cutoff
+                 ORDER BY updated_at
+                 LIMIT :limit
+                """)
+                .param("cutoff", Timestamp.from(cutoff))
+                .param("limit", limit)
+                .query((rs, n) -> new StaleExecution(TenantId.of(rs.getString("tenant_id")),
+                        new ExecutionId(rs.getObject("id", java.util.UUID.class)),
+                        ExecutionStatus.valueOf(rs.getString("status"))))
+                .list();
+    }
+
+    /** A live row the reconciler should compare with its engine run. */
+    public record StaleExecution(TenantId tenantId, ExecutionId id, ExecutionStatus status) {
+    }
+
     public List<NodeRunRecord> findNodeRuns(TenantId tenantId, ExecutionId id) {
         return jdbc.sql("""
                 SELECT node_id, call_index, phase, attempt, status, error_code, error_message, started_at, ended_at
