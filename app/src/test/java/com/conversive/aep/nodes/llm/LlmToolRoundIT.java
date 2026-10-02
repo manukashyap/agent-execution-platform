@@ -15,6 +15,7 @@ import com.conversive.aep.common.NonRetryableError;
 import com.conversive.aep.common.Phase;
 import com.conversive.aep.common.Priority;
 import com.conversive.aep.common.TenantId;
+import com.conversive.aep.common.http.NonLiveEgress;
 import com.conversive.aep.nodes.NodeContext;
 import com.conversive.aep.nodes.NodeResult;
 import com.conversive.aep.support.WireMockToolsIntegrationTest;
@@ -118,6 +119,25 @@ class LlmToolRoundIT extends WireMockToolsIntegrationTest {
         assertThat(mapper.readTree(second).path("messages").findValuesAsText("role")).contains("tool");
         assertThat(second).contains("\\\"untrusted\\\":true").contains("lead_7").contains("Ada");
         assertNoCredentialAnywhere(exec, result);
+    }
+
+    @Test
+    void aDryRunWithAllowReadOnlyFalseNeverReachesTheRealTool() throws Exception {
+        stubLlm("crm.get", "{\"external_ref\":\"lead_7\"}");
+        stubMcp(CONTACTS);
+        NodeContext live = context(ExecutionId.random(), "{\"prompt\":\"Look up {{ref}}\",\"tools\":[\"crm.get\"]}");
+        NodeContext dry = new NodeContext(live.tenantId(), live.executionId(), live.workflowId(), live.defVersion(),
+                live.nodeId(), live.nodeType(), live.callIndex(), live.attempt(), live.phase(), ExecutionMode.DRY_RUN,
+                false, live.config(), live.input(), live.startToClose(), live.priority(),
+                new com.conversive.aep.nodes.DryRunOptions(false, false));
+
+        NodeResult result = NonLiveEgress.permit(() -> executor.execute(dry));
+
+        assertThat(WIRE_MOCK.findAll(com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor(
+                urlEqualTo("/mcp")))).isEmpty();
+        assertThat(result.output().path("tool_results").get(0).path("result")).isNotEqualTo(mapper.readTree(CONTACTS));
+        assertThat(result.output().path("tool_results").get(0).path("result").path("name").asText())
+                .isEqualTo("Dry Run");
     }
 
     @Test

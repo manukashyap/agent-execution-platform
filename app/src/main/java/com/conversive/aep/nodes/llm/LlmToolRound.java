@@ -1,6 +1,7 @@
 package com.conversive.aep.nodes.llm;
 
 import com.conversive.aep.common.ErrorCodes;
+import com.conversive.aep.common.ExecutionMode;
 import com.conversive.aep.common.NonRetryableError;
 import com.conversive.aep.nodes.NodeContext;
 import com.conversive.aep.router.LlmMessage;
@@ -113,8 +114,24 @@ public class LlmToolRound {
             throw new NonRetryableError(ErrorCodes.TOOL_FORBIDDEN, "model requested tool '" + call.name()
                     + "' which is not a READ_ONLY tool listed on node " + ctx.nodeId());
         }
+        if (declinedByDryRun(ctx)) {
+            return mockedResult(allowed.get(call.name()));
+        }
         return gateway.invoke(new ToolInvocation(ctx.tenantId(), ctx.executionId(), ctx.nodeId(), ctx.callIndex(),
                 Math.max(1, ctx.attempt()), ctx.phase(), ctx.mode(), call.name(), arguments(call), timeout));
+    }
+
+    /** 06 §4.10: {@code allowReadOnly=false} keeps even READ_ONLY tools off the network in a non-LIVE run. */
+    private static boolean declinedByDryRun(NodeContext ctx) {
+        return ctx.mode() != ExecutionMode.LIVE && ctx.dryRun() != null && !ctx.dryRun().allowReadOnly();
+    }
+
+    private JsonNode mockedResult(ToolDefinition tool) {
+        JsonNode example = tool.dryRunExample();
+        if (example != null && !example.isMissingNode() && !example.isNull()) {
+            return example.deepCopy();
+        }
+        return mapper.createObjectNode().put("dry_run", true);
     }
 
     private JsonNode arguments(LlmToolCall call) {
