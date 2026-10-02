@@ -100,7 +100,7 @@ class CompensationLookupIT extends PostgresIntegrationTest {
     void anInterruptedLookupForwardIsLookedUpAndItsContactDeleted() throws Exception {
         h.publish("""
                 {"workflow_id":"lk","version":1,"nodes":[
-                  {"id":"upsert","type":"mcp","timeout_s":2,"retry":{"max_attempts":1},
+                  {"id":"upsert","type":"mcp","timeout_s":2,"schedule_to_close_s":9,"retry":{"max_attempts":3,"initial_interval_ms":10000},
                    "config":{"tool":"crm.upsert","args":{"external_ref":"lead_9","name":"Ada","email":"a@example.com"}},
                    "compensate":{"type":"mcp","config":{"tool":"crm.delete","args":{"external_ref":"lead_9"}}}}
                   ]}

@@ -54,6 +54,19 @@ class DefinitionValidatorTest {
     }
 
     @Test
+    void sideEffectDefaultsAndExactFloorAreValid() {
+        ValidationReport report = validate(wf("{\"id\":\"a\",\"type\":\"http\",\"side_effecting\":true,"
+                + "\"timeout_s\":10,\"schedule_to_close_s\":25,\"retry\":{\"max_attempts\":3},"
+                + "\"config\":{\"url\":\"u\"}},"
+                + "{\"id\":\"b\",\"type\":\"http\",\"depends_on\":[\"a\"],\"side_effecting\":true,"
+                + "\"config\":{\"url\":\"u\"}},"
+                + "{\"id\":\"c\",\"type\":\"http\",\"depends_on\":[\"b\"],\"retry\":{\"max_attempts\":1},"
+                + "\"config\":{\"url\":\"u\"}}"));
+
+        assertThat(report.errors()).isEmpty();
+    }
+
+    @Test
     void conditionWithBranchesAndFanOutIsValid() {
         ValidationReport report = validate(wf(HTTP_A + ","
                 + "{\"id\":\"c\",\"type\":\"condition\",\"config\":{\"left\":\"$.a.status\",\"op\":\"eq\",\"right\":200,"
@@ -118,6 +131,17 @@ class DefinitionValidatorTest {
                         + "\"config\":{\"url\":\"u\"}}"), RETRY_OUT_OF_RANGE),
                 row("ScheduleToClose < StartToClose + lease grace", wf("{\"id\":\"a\",\"type\":\"http\",\"timeout_s\":30,"
                         + "\"schedule_to_close_s\":34,\"config\":{\"url\":\"u\"}}"), SCHEDULE_TO_CLOSE_TOO_SHORT),
+                row("ScheduleToClose below the TimingContract floor (StartToClose + lease)",
+                        wf("{\"id\":\"a\",\"type\":\"http\",\"timeout_s\":30,\"schedule_to_close_s\":60,"
+                                + "\"config\":{\"url\":\"u\"}}"), SCHEDULE_TO_CLOSE_TOO_SHORT),
+                row("side-effecting http with max_attempts 2",
+                        wf("{\"id\":\"a\",\"type\":\"http\",\"side_effecting\":true,"
+                                + "\"retry\":{\"max_attempts\":2},\"config\":{\"url\":\"u\"}}"),
+                        SIDE_EFFECT_NEEDS_THREE_ATTEMPTS),
+                row("side-effecting mcp tool with max_attempts 1",
+                        wf("{\"id\":\"a\",\"type\":\"mcp\",\"retry\":{\"max_attempts\":1},"
+                                + "\"config\":{\"tool\":\"payments.charge\"}}"),
+                        SIDE_EFFECT_NEEDS_THREE_ATTEMPTS),
                 row("maxCostUsd above tenant ceiling", wf(HTTP_A, ",\"limits\":{\"max_cost_usd\":5.01}"),
                         LIMIT_ABOVE_CEILING),
                 row("maxTokens above tenant ceiling", wf(HTTP_A, ",\"limits\":{\"max_tokens\":200001}"),
