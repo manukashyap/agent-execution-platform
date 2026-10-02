@@ -183,3 +183,23 @@ P8 (observability, T8.1/T8.2) deviations and assumptions:
   - `llmFallbacks` counts calls with seq > 0.
   - Budget totals are the per-execution reservation sums (reserved = still RESERVED).
 - **`TemporalTaskQueueBacklog`** has no dedicated test. The DescribeTaskQueue API was verified in T0.7.
+
+### P2a / P2b (DAG interpreter, linear saga)
+
+- **Commit split:** T2a.4 and T2a.6 landed inside the T2a.2 commit. The stub workflow deletion is in T2a.1.
+- **Engine ITs use scripted executors:** `DagInterpreterIT` drives interpreter semantics (timing, retries, fatal errors) through the test-only `ScriptedExecutor` under the `mcp` type label. `SagaIT` uses the real `http` executor and `BudgetCapIT` the real `llm` executor (`test.real-node-types`). The real `McpToolExecutor` is covered by the P4 tests; it cannot script sleeps or failure counts, so the scripted fallback stays (test scope only, nothing in main).
+- **on_failure CONTINUE:** a run whose only failures are CONTINUE nodes ends SUCCEEDED.
+- **START_FAILED:** after a successful relaunch, the earlier error_code and ended_at stay on the row (the CAS COALESCEs them).
+- **Cancel:** the SDK closes a cancel-requested run as CANCELED even when the workflow returns normally. The DB row is the source of truth. `ApiContractIT`'s cancel expectation was adjusted to match.
+- **Saga triggers:** cancel and timeout also compensate, not only FAILED.
+- **Nothing to undo:** when every saga step is SKIPPED, the run keeps its original status (e.g. FAILED), even though the row passed through COMPENSATING.
+- **Compensation retries:** they use the node's retry policy when max_attempts > 1, otherwise 6 attempts (500 ms, x2, 30 s cap).
+- **Reconcile-forward:** a RECONCILE_FORWARD re-run does not record a node_run. It is bounded at 2 rounds and then becomes NEEDS_ATTENTION. LOOKUP reconciliation uses a no-lookup EffectCall.
+- **Activity result enum:** `CompensationActivity.Result` mirrors `CompensationDecision.Kind` so `engine.workflow` never imports `sideeffect`. The ArchUnit rules are unchanged.
+- **No new columns:** V1 has no cost or token columns, so the per-node cost lives in `NodeOutputRef` only. The execution output is the sink nodes' outputs, or `{"$stored":"node_output"}` when they are too large.
+- **Orphaned RUNNING rows:** a worker kill mid-attempt leaves that attempt's RUNNING `node_run` row. The next attempt writes its own row.
+- **Engine metric call sites (`ActivityTelemetry`):**
+  - `executionCompleted` fires on an applied terminal CAS; its latency is measured from started_at.
+  - `nodeCompleted` fires on success, or on a failure that is final (non-retryable, cancelled, or the last attempt). Its latency is measured from the first schedule.
+  - `nodeRetried` and `scheduleToStart` fire at activity entry.
+  - `compensation` fires per step: COMPENSATED becomes SUCCEEDED; NEEDS_ATTENTION, PIVOT_EXECUTED or a final failure become FAILED; SKIPPED is not counted.
