@@ -160,6 +160,31 @@ class OutboundClientTest {
     }
 
     @Test
+    void bodyOverTheCapIsRejectedAsNonRetryableWhetherOrNotLengthIsAnnounced() {
+        OutboundClient capped = new OutboundClient(new OutboundProperties(List.of("localhost:" + wireMock.port()),
+                List.of(), Duration.ofSeconds(1)).withMaxResponseBytes(1000), MAPPER, Clock.systemUTC());
+        String big = "{\"a\":\"" + "x".repeat(5000) + "\"}";
+        wireMock.stubFor(get("/big").willReturn(okJson(big)));
+        wireMock.stubFor(get("/big-chunked").willReturn(okJson(big).withChunkedDribbleDelay(5, 10)));
+
+        for (String path : List.of("/big", "/big-chunked")) {
+            assertThatThrownBy(() -> capped.send(OutboundRequest.get(uri(path), TIMEOUT, ExecutionMode.LIVE)))
+                    .isInstanceOfSatisfying(NonRetryableError.class,
+                            e -> assertThat(e.code()).isEqualTo(ErrorCodes.RESPONSE_TOO_LARGE));
+        }
+    }
+
+    @Test
+    void bodyUnderTheCapIsReadNormally() {
+        OutboundClient capped = new OutboundClient(new OutboundProperties(List.of("localhost:" + wireMock.port()),
+                List.of(), Duration.ofSeconds(1)).withMaxResponseBytes(1000), MAPPER, Clock.systemUTC());
+        wireMock.stubFor(get("/small").willReturn(okJson("{\"a\":1}")));
+
+        assertThat(capped.send(OutboundRequest.get(uri("/small"), TIMEOUT, ExecutionMode.LIVE)).body().get("a").asInt())
+                .isEqualTo(1);
+    }
+
+    @Test
     void serverErrorIsRetryable() {
         wireMock.stubFor(get("/down").willReturn(aResponse().withStatus(503)));
 

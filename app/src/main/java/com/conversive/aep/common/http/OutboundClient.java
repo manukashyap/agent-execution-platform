@@ -6,10 +6,14 @@ import com.conversive.aep.common.RetryableError;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PreDestroy;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InterruptedIOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
@@ -22,20 +26,25 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.TreeMap;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.apache.hc.client5.http.DnsResolver;
 import org.apache.hc.client5.http.config.ConnectionConfig;
+import org.apache.hc.client5.http.classic.methods.HttpUriRequestBase;
 import org.apache.hc.client5.http.config.RequestConfig;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuilder;
 import org.apache.hc.client5.http.protocol.HttpClientContext;
-import org.apache.hc.core5.http.ClassicHttpRequest;
 import org.apache.hc.core5.http.ClassicHttpResponse;
+import org.apache.hc.core5.http.ConnectionRequestTimeoutException;
+import org.apache.hc.core5.http.ContentTooLongException;
 import org.apache.hc.core5.http.ContentType;
 import org.apache.hc.core5.http.Header;
-import org.apache.hc.core5.http.ParseException;
-import org.apache.hc.core5.http.io.entity.EntityUtils;
-import org.apache.hc.core5.http.io.support.ClassicRequestBuilder;
+import org.apache.hc.core5.http.HttpEntity;
+import org.apache.hc.core5.http.io.entity.ByteArrayEntity;
 import org.apache.hc.core5.util.Timeout;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -55,6 +64,10 @@ public class OutboundClient {
     private final EgressPolicy policy;
     private final ObjectMapper mapper;
     private final Clock clock;
+    private final Duration connectionRequestTimeout;
+    private final int maxResponseBytes;
+    /** Fires {@code HttpUriRequestBase.cancel()} at each call's deadline; one daemon thread, tasks are tiny. */
+    private final ScheduledThreadPoolExecutor deadlines = newDeadlineScheduler();
     /** Whether the request sent on this thread targets an allow-listed host; the client connects on the caller's thread. */
     private final ThreadLocal<Boolean> allowListed = new ThreadLocal<>();
 
@@ -68,6 +81,8 @@ public class OutboundClient {
         this.http = HttpClients.custom()
                 .setConnectionManager(PoolingHttpClientConnectionManagerBuilder.create()
                         .setDnsResolver(new ValidatingDnsResolver())
+                        .setMaxConnTotal(properties.maxConnTotal())
+                        .setMaxConnPerRoute(properties.maxConnPerRoute())
                         .setDefaultConnectionConfig(ConnectionConfig.custom()
                                 .setConnectTimeout(Timeout.of(properties.connectTimeout())).build())
                         .build())
@@ -77,6 +92,24 @@ public class OutboundClient {
                 .build();
         this.mapper = mapper;
         this.clock = clock;
+        this.connectionRequestTimeout = properties.connectionRequestTimeout();
+        this.maxResponseBytes = properties.maxResponseBytes();
+    }
+
+    private static ScheduledThreadPoolExecutor newDeadlineScheduler() {
+        ScheduledThreadPoolExecutor scheduler = new ScheduledThreadPoolExecutor(1, runnable -> {
+            Thread thread = new Thread(runnable, "outbound-deadline");
+            thread.setDaemon(true);
+            return thread;
+        });
+        scheduler.setRemoveOnCancelPolicy(true);
+        return scheduler;
+    }
+
+    @PreDestroy
+    void close() throws IOException {
+        deadlines.shutdownNow();
+        http.close();
     }
 
     /** The client's only DNS lookup: resolves once and rejects non-public answers unless the target is allow-listed. */
@@ -99,49 +132,96 @@ public class OutboundClient {
         return classify(request, result);
     }
 
-    private ClassicHttpRequest toHttpRequest(OutboundRequest request) {
-        ClassicRequestBuilder builder = ClassicRequestBuilder.create(request.method())
-                .setUri(request.uri())
-                .addHeader("Accept", "application/json");
+    private HttpUriRequestBase toHttpRequest(OutboundRequest request) {
+        HttpUriRequestBase http = new HttpUriRequestBase(request.method(), request.uri());
+        http.addHeader("Accept", "application/json");
         if (request.body() != null) {
-            builder.setEntity(write(request.body()).getBytes(StandardCharsets.UTF_8), JSON);
+            http.setEntity(new ByteArrayEntity(write(request.body()).getBytes(StandardCharsets.UTF_8), JSON));
         }
-        request.headers().forEach(builder::setHeader);
+        request.headers().forEach(http::setHeader);
         if (request.idempotencyKey() != null) {
-            builder.setHeader(IDEMPOTENCY_KEY, request.idempotencyKey());
+            http.setHeader(IDEMPOTENCY_KEY, request.idempotencyKey());
         }
-        return builder.build();
+        return http;
     }
 
     private RawResponse exchange(OutboundRequest request, boolean exempt) {
         String host = request.uri().getHost();
+        HttpUriRequestBase http = toHttpRequest(request);
         HttpClientContext context = HttpClientContext.create();
         context.setRequestConfig(RequestConfig.custom()
                 .setResponseTimeout(Timeout.of(request.timeout()))
-                .setConnectionRequestTimeout(Timeout.of(request.timeout()))
+                .setConnectionRequestTimeout(Timeout.of(min(connectionRequestTimeout, request.timeout())))
                 .build());
+        AtomicBoolean deadlineHit = new AtomicBoolean();
+        // responseTimeout is per socket read; this bounds pool wait + connect + the whole body.
+        ScheduledFuture<?> deadline = deadlines.schedule(() -> {
+            deadlineHit.set(true);
+            http.cancel();
+        }, request.timeout().toNanos(), TimeUnit.NANOSECONDS);
         allowListed.set(exempt);
         try {
-            return http.execute(toHttpRequest(request), context, OutboundClient::readResponse);
-        } catch (InterruptedIOException e) {
-            throw new RetryableError(ErrorCodes.UPSTREAM_TIMEOUT, "timeout calling " + host, null, e);
+            return this.http.execute(http, context, response -> readResponse(http, response));
+        } catch (ContentTooLongException e) {
+            throw new NonRetryableError(ErrorCodes.RESPONSE_TOO_LARGE,
+                    "response from " + host + " exceeds " + maxResponseBytes + " bytes", e);
+        } catch (ConnectionRequestTimeoutException e) {
+            throw new RetryableError(ErrorCodes.UPSTREAM_NOT_SENT, "no free connection to " + host, null, e);
         } catch (IOException e) {
+            if (deadlineHit.get() || e instanceof InterruptedIOException) {
+                throw new RetryableError(ErrorCodes.UPSTREAM_TIMEOUT, "timeout calling " + host, null, e);
+            }
             throw new RetryableError(ErrorCodes.UPSTREAM_IO, "I/O error calling " + host, null, e);
         } finally {
+            deadline.cancel(false);
             allowListed.remove();
         }
     }
 
-    private static RawResponse readResponse(ClassicHttpResponse response) throws IOException {
+    private static Duration min(Duration a, Duration b) {
+        return a.compareTo(b) <= 0 ? a : b;
+    }
+
+    /** Reads at most {@code maxResponseBytes}; an oversize body aborts the connection instead of draining it. */
+    private RawResponse readResponse(HttpUriRequestBase request, ClassicHttpResponse response) throws IOException {
         Map<String, List<String>> headers = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
         for (Header header : response.getHeaders()) {
             headers.computeIfAbsent(header.getName(), k -> new ArrayList<>()).add(header.getValue());
         }
+        HttpEntity entity = response.getEntity();
+        if (entity == null) {
+            return new RawResponse(response.getCode(), headers, null);
+        }
         try {
-            String body = response.getEntity() == null ? null : EntityUtils.toString(response.getEntity());
-            return new RawResponse(response.getCode(), headers, body);
-        } catch (ParseException e) {
-            throw new IOException("unreadable response body", e);
+            byte[] bytes = readBounded(entity);
+            ContentType type = ContentType.parseLenient(entity.getContentType());
+            Charset charset = type == null ? StandardCharsets.ISO_8859_1 : type.getCharset(StandardCharsets.ISO_8859_1);
+            return new RawResponse(response.getCode(), headers, new String(bytes, charset));
+        } catch (ContentTooLongException e) {
+            request.cancel();
+            throw e;
+        }
+    }
+
+    /** Streams the body into memory, failing the moment it passes the cap (announced length or not). */
+    private byte[] readBounded(HttpEntity entity) throws IOException {
+        if (entity.getContentLength() > maxResponseBytes) {
+            throw new ContentTooLongException("Content length " + entity.getContentLength() + " exceeds " + maxResponseBytes);
+        }
+        try (InputStream in = entity.getContent()) {
+            if (in == null) {
+                return new byte[0];
+            }
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = in.read(buffer)) != -1) {
+                if (out.size() + read > maxResponseBytes) {
+                    throw new ContentTooLongException("Content exceeds " + maxResponseBytes + " bytes");
+                }
+                out.write(buffer, 0, read);
+            }
+            return out.toByteArray();
         }
     }
 
