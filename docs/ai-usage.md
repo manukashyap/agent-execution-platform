@@ -138,3 +138,25 @@ P4 (tools / MCP) deviations and assumptions:
   - Tool calls cost 0 against the budget; budget is charged per LLM turn by the router.
   - In-round tool calls reuse the node's `callIndex` in the audit. They are READ_ONLY, so they have no ledger key.
 - **Not done here (outside P4 ownership):** a definition-validator rule to reject llm nodes whose `tools` include non-READ_ONLY tools or whose `maxToolCalls` is outside 1–3. Today this is enforced at runtime only. `/v1/tools` relies on the P1 auth filter populating `TenantContext`, and returns 401 when it is absent.
+
+P7 (tenancy and cost, T7.1–T7.3) deviations and assumptions:
+
+- **Extra V5 table `execution_budget`:** docs/06 lists only `tenant_budget` and `budget_reservation`. A per-execution counter row (`limit_usd`, `reserved_usd`, `spent_usd`) makes the per-execution cap atomic under concurrent `forEach` reservations, using the same conditional `UPDATE … WHERE spent+reserved+amt <= limit` as the tenant row. It has no FK to `workflow_execution`.
+- **`node_id` / `call_index` parsed from the ref:** the `BudgetService` interface is unchanged; the router's ref `llm:{nodeId}:{callIndex}:…` is parsed into those columns (null if unparseable).
+- **Execution cap derivation (SQL, lazily on the first reservation):**
+  - Uses the definition's `limits.max_cost_usd` (or `maxCostUsd`) when set.
+  - Otherwise, for DRY_RUN, `LEAST(tenant ceiling, aep.cost.dry-run-max-cost-usd = 0.50)`.
+  - Otherwise the ceiling, which is `tenant_limits.max_cost_usd`, falling back to `aep.cost.fallback-execution-max-cost-usd = 5`.
+- **Tenant budget:** the row is created lazily at `aep.cost.default-tenant-budget-usd = 100`, MONTHLY. There is no period rollover job and no stale-reservation reaper; both are design-only.
+- **Confirm/cancel:** a late confirm after a cancel still records the spend, without releasing twice. Confirming an unknown or already-confirmed id is a no-op (a warn is logged for a non-UUID id).
+- **Admission:**
+  - The token bucket is per replica (in-memory), so the effective rate is the configured rate × the number of replicas.
+  - The rate is checked before the concurrency cap, so a request rejected by the cap still consumes a token.
+  - The concurrency cap is soft (a derived `count(*)` of live executions). Overshoot is bounded by the number of concurrent admitters.
+  - Tenant limits and tiers are cached for 30s (`aep.tenancy.limits-refresh`). A missing `tenant_limits` row uses the `aep.tenancy.default-*` values.
+- **Temporal priority:**
+  - The tier sets the base priority key: ENTERPRISE 2, STANDARD 3, FREE 4. The execution's priority shifts it: HIGH −1, LOW +1. The result is clamped to 1–5.
+  - `fairnessKey` = tenant id. `fairnessWeight` is ENTERPRISE 4, STANDARD 2, FREE 1.
+  - `TemporalExecutionLauncher` keeps its 4-arg constructor, which uses `TemporalPriorityPolicy.uniform()`; Spring uses the 5-arg one.
+- **Test fixture:** `LlmExecutorIT` now inserts its tenant row, because budget rows have an FK to `tenant`.
+- **Load tests:** new tenants get `rate_per_sec` 10 / `burst` 20 by default. Load-test tenants need their `tenant_limits` raised (P9).
