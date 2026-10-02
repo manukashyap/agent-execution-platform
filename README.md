@@ -95,7 +95,7 @@ Node types: `http`, `llm`, `mcp`, `condition`; parallelism comes from the DAG (`
 
 ## Demo scripts (`scripts/`)
 
-Each prints its own checks. All need `AEP_DEV_API_KEY` set to the key the app was started with, and honour `AEP_BASE_URL` / `BASE_URL` (default `http://localhost:8000`) and `AEP_MOCKS_URL` / `MOCKS_URL` (default `http://localhost:8090`). Run the stack first (compose `lite` plus the app, or the dev path).
+Each prints its own checks. All need `AEP_DEV_API_KEY` set to the key the app was started with, and honour `AEP_BASE_URL` / `BASE_URL` (default `http://localhost:8000`) and `AEP_MOCKS_URL` / `MOCKS_URL` (default `http://localhost:8090`). Workflow nodes are resolved by the app, so against the compose `app` container the scripts publish `http://mocks:8090` URLs automatically (override with `AEP_WF_MOCKS_URL`). Run the stack first (compose `lite` plus the app, or the dev path).
 
 | Script | What it proves |
 |---|---|

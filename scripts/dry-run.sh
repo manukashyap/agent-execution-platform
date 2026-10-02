@@ -10,6 +10,8 @@ set -euo pipefail
 
 BASE="${BASE_URL:-${AEP_BASE_URL:-http://localhost:8000}}"
 MOCKS="${MOCKS_URL:-${AEP_MOCKS_URL:-http://localhost:8090}}"
+# URL the app resolves for workflow nodes: inside the compose app container the mocks are http://mocks:8090, not localhost.
+WF_MOCKS="${AEP_WF_MOCKS_URL:-$(if docker ps --format "{{.Names}}" 2>/dev/null | grep -qx aep-app-1; then echo http://mocks:8090; else echo "$MOCKS"; fi)}"
 KEY="${AEP_DEV_API_KEY:?set AEP_DEV_API_KEY to the key the app was started with}"
 MOCK_LLM="${MOCK_LLM:-false}"
 RUN="$(date +%s)"
@@ -46,7 +48,7 @@ echo "== POST /v1/workflows ($WF: fetch -> classify -> crm.upsert -> messaging.s
 api -X POST "$BASE/v1/workflows" -d @- <<JSON
 {"workflow_id":"$WF","version":1,"nodes":[
   {"id":"fetch_leads","type":"http","side_effecting":false,
-   "config":{"url":"$MOCKS/leads?limit=3","method":"GET"}},
+   "config":{"url":"$WF_MOCKS/leads?limit=3","method":"GET"}},
   {"id":"classify_leads","type":"llm",
    "config":{"prompt":"Classify each lead as hot, warm or cold: {{fetch_leads.body}}"}},
   {"id":"update_crm","type":"mcp",

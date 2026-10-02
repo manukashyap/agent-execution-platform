@@ -7,6 +7,8 @@ set -euo pipefail
 
 BASE="${AEP_BASE_URL:-http://localhost:8000}"
 MOCKS="${AEP_MOCKS_URL:-http://localhost:8090}"
+# URL the app resolves for workflow nodes: inside the compose app container the mocks are http://mocks:8090, not localhost.
+WF_MOCKS="${AEP_WF_MOCKS_URL:-$(if docker ps --format "{{.Names}}" 2>/dev/null | grep -qx aep-app-1; then echo http://mocks:8090; else echo "$MOCKS"; fi)}"
 KEY="${AEP_DEV_API_KEY:?set AEP_DEV_API_KEY to the key the app was started with}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SPEC="$ROOT/app/src/test/resources/fixtures/pdf-example.json"
@@ -30,13 +32,13 @@ echo
 echo "== POST /v1/workflows ($WF: http -> llm -> condition -> http)"
 api -X POST "$BASE/v1/workflows" -d @- <<JSON
 {"workflow_id":"$WF","version":1,"nodes":[
-  {"id":"fetch_leads","type":"http","config":{"url":"$MOCKS/leads?limit=3","method":"GET"}},
+  {"id":"fetch_leads","type":"http","config":{"url":"$WF_MOCKS/leads?limit=3","method":"GET"}},
   {"id":"classify","type":"llm","depends_on":["fetch_leads"],
    "config":{"prompt":"Classify these leads as hot, warm or cold: {{fetch_leads.body}}"}},
   {"id":"has_leads","type":"condition","depends_on":["fetch_leads"],
    "config":{"left":"\$.fetch_leads.status","op":"eq","right":200,"then":["upsert"],"else":[]}},
   {"id":"upsert","type":"http","depends_on":["has_leads","classify"],
-   "config":{"url":"$MOCKS/crm/contacts","method":"POST",
+   "config":{"url":"$WF_MOCKS/crm/contacts","method":"POST",
              "body":{"external_ref":"happy-$RUN","name":"{{fetch_leads.body.leads.0.name}}",
                      "email":"{{fetch_leads.body.leads.0.email}}","label":"{{classify.content}}"}}}]}
 JSON

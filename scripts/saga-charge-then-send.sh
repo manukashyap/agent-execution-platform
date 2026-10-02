@@ -8,6 +8,8 @@ set -euo pipefail
 
 BASE="${AEP_BASE_URL:-http://localhost:8000}"
 MOCKS="${AEP_MOCKS_URL:-http://localhost:8090}"
+# URL the app resolves for workflow nodes: inside the compose app container the mocks are http://mocks:8090, not localhost.
+WF_MOCKS="${AEP_WF_MOCKS_URL:-$(if docker ps --format "{{.Names}}" 2>/dev/null | grep -qx aep-app-1; then echo http://mocks:8090; else echo "$MOCKS"; fi)}"
 KEY="${AEP_DEV_API_KEY:?set AEP_DEV_API_KEY to the key the app was started with}"
 VARIANT="${VARIANT:-}"
 RUN="$(date +%s)"
@@ -44,12 +46,12 @@ api -X POST "$BASE/v1/workflows" -d @- <<JSON
 {"workflow_id":"$WF","version":1,"nodes":[
   {"id":"charge","type":"http","side_effecting":true,
    "retry":{"max_attempts":3,"initial_interval_ms":200},
-   "config":{"url":"$MOCKS/payments/charge","method":"POST",
+   "config":{"url":"$WF_MOCKS/payments/charge","method":"POST",
              "body":{"customer_id":"cus_$RUN","amount_cents":4200,"currency":"usd"}},
-   "compensate":{"type":"http","config":{"url":"$MOCKS/payments/refund","method":"POST",
+   "compensate":{"type":"http","config":{"url":"$WF_MOCKS/payments/refund","method":"POST",
                  "body":{"charge_id":"{{forward.body.charge_id}}"}}}},
   {"id":"send","type":"http","depends_on":["charge"],
-   "config":{"url":"$MOCKS/messaging/send","method":"POST",
+   "config":{"url":"$WF_MOCKS/messaging/send","method":"POST",
              "body":{"to":"+15550100","body":"Payment {{charge.body.charge_id}} received"}}}]}
 JSON
 echo
