@@ -66,3 +66,19 @@ P0 deviations from docs/06 and docs/07:
 - **OutboundClient 4xx handling:** every 4xx except 429 becomes NonRetryable `UPSTREAM_CLIENT_ERROR`, including 409. P5 may need to treat 409 "request in flight" as retryable `EFFECT_IN_PROGRESS`.
 - **SSRF / DNS rebinding gap:** `EgressPolicy` resolves the host and checks every address, but the HTTP client resolves again on connect. Pinning the resolved IP is deferred.
 - **OTel:** trace propagation on outbound calls is deferred to P8.
+
+P3 (router) deviations and assumptions:
+
+- **`LLM_UNAVAILABLE`:** added to `common.ErrorCodes`. Raised as retryable when the primary and every fallback failed within one attempt.
+- **`llm_call` (V3):**
+  - No FKs to `workflow_execution`, so the dev debug endpoint can record calls.
+  - An extra `seq` column: 0 = primary, 1..2 = fallbacks within one attempt.
+  - Rows are written by the router (one per provider call), not by the node executor.
+- **Capabilities:** vLLM is configured without `tools` (chat, json only), so tool-calling turns route to A/B.
+- **NORMAL weights:** latency 0.35, cost 0.45, errors 0.2. They lean slightly to cost so A and B don't tie and B wins, matching the 01 §9 spill direction. HIGH is 0.7/0.1/0.2 and LOW is 0.1/0.7/0.2. The DEGRADED penalty is +1.0.
+- **Latency term:** HEALTHY providers are scored on their configured nominal latency, not the observed p95. Scoring on the observed p95 moved traffic away after a single slow window and starved the tracker of the samples it needs to ever reach DEGRADED. The observed p95 is scored only for DEGRADED providers. The error rate is always the observed one; it ages out with the 6-window lookback.
+- **HALF_OPEN → HEALTHY:** happens after 10 probes when at most 2 failed and the probe p95 is ≤ 2 s; otherwise the provider goes back to OPEN. This decision rule is an assumption; the spec says only "by outcome".
+- **Model hint:** `model` in the llm config is a soft preference (reason `model_hint`), honoured only when an eligible provider serves exactly that model.
+- **Recovery needs ≥ 40 req/s total:** recovery requires 3 windows with ≥ 20 samples each. While DEGRADED, vLLM gets only the 5 % probe share, so total traffic must be at least 20 / (0.05 × 10 s) = 40 req/s. `scripts/vllm-degradation.sh` therefore defaults to 50 req/s, not 5.
+- **Debug endpoint:** `/internal/router/complete` and `/internal/router/state` exist only under `@Profile("dev")`, to drive the script until the engine runs llm nodes.
+- **Compose:** the app container needs `AEP_LLM_A_URL`, `AEP_LLM_B_URL` and `AEP_VLLM_URL` pointing at `http://mocks:8090/llm/...`. The yml defaults target localhost.
