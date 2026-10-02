@@ -90,7 +90,7 @@ public class OutboundClient {
             throw new RetryableError(ErrorCodes.UPSTREAM_UNAVAILABLE, target, retryAfter(response).orElse(null));
         }
         if (status >= 400) {
-            throw new NonRetryableError(ErrorCodes.UPSTREAM_CLIENT_ERROR, target);
+            throw new UpstreamClientError(status, response.body(), target);
         }
         return response;
     }

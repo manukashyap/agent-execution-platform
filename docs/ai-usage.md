@@ -66,3 +66,22 @@ P0 deviations from docs/06 and docs/07:
 - **OutboundClient 4xx handling:** every 4xx except 429 becomes NonRetryable `UPSTREAM_CLIENT_ERROR`, including 409. P5 may need to treat 409 "request in flight" as retryable `EFFECT_IN_PROGRESS`.
 - **SSRF / DNS rebinding gap:** `EgressPolicy` resolves the host and checks every address, but the HTTP client resolves again on connect. Pinning the resolved IP is deferred.
 - **OTel:** trace propagation on outbound calls is deferred to P8.
+
+P5 deviations (side-effect ledger, T5.1/T5.2/T5.4):
+
+- **Ledger `response jsonb` column:** added so a COMMITTED row can return the stored result. `response_ref` is kept but unused.
+- **7th seeded tool:** `crm.delete` (RETRIABLE, NATIVE_KEY), added as the compensation for `crm.upsert`, because the registry has a self-FK and a CHECK requiring COMPENSATABLE tools to name an inverse. The mocks need `POST /crm/delete {external_ref}`.
+- **Live lease means in progress for any owner:** this includes the same attempt number. An attempt number cannot tell a re-entry from a concurrent duplicate, so the row is never re-taken while its lease is live.
+- **Provider 409 handling:** `OutboundClient` now throws `common.http.UpstreamClientError`, a subclass of NonRetryable `UPSTREAM_CLIENT_ERROR`, which carries the status and body. The guard maps a 409 whose `error` is absent or `"in_progress"` to retryable `EFFECT_IN_PROGRESS` for the remaining lease and leaves the row unchanged.
+- **Retryable failures by kind:**
+  - 429 deletes the PENDING row, because the provider did nothing. Otherwise a NONE-mode tool would become NEEDS_ATTENTION just for being rate-limited.
+  - 5xx expires the lease at once, so the next attempt reconciles right away.
+  - Timeouts and IO errors keep the lease, because the call may still land.
+- **FAILED on entry:** throws NonRetryable `UPSTREAM_CLIENT_ERROR` without calling the provider. Taking ownership of an UNKNOWN row moves it back to PENDING.
+- **`ErrorCodes.NEEDS_ATTENTION`:** added to `common`.
+- **`EffectSpec` key check:** the record now verifies that its key equals `EffectKey.of(identity)`. Build it with `EffectSpec.of(...)`.
+- **`CompensationReconciler.decide`:** takes the forward tool's `Reversibility`, because the ledger stores no tool name and PIVOT detection needs it. It also takes an optional forward `EffectCall`, used only for `lookup()`.
+- **Reconciler states:**
+  - A live forward lease throws `RetryableError(EFFECT_IN_PROGRESS)` instead of returning a decision.
+  - A NATIVE_KEY forward with an unresolved outcome returns `RECONCILE_FORWARD`: the engine re-runs the forward through the guard, then decides again.
+  - A LOOKUP forward that is not found returns SKIP and leaves the row as it is.

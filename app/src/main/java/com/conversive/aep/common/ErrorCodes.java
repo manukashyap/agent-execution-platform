@@ -13,6 +13,8 @@ public final class ErrorCodes {
 
     public static final String EFFECT_IN_PROGRESS = "EFFECT_IN_PROGRESS";
     public static final String EFFECT_UNKNOWN = "EFFECT_UNKNOWN";
+    /** The effect may or may not have happened and no reconciliation exists; a human must decide. */
+    public static final String NEEDS_ATTENTION = "NEEDS_ATTENTION";
     public static final String TOOL_FORBIDDEN = "TOOL_FORBIDDEN";
     public static final String TOOL_NOT_FOUND = "TOOL_NOT_FOUND";
     public static final String VALIDATION_FAILED = "VALIDATION_FAILED";
