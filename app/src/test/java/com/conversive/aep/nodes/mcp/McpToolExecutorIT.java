@@ -18,7 +18,7 @@ import com.conversive.aep.common.Priority;
 import com.conversive.aep.common.TenantId;
 import com.conversive.aep.nodes.NodeContext;
 import com.conversive.aep.nodes.NodeResult;
-import com.conversive.aep.nodes.TypeExecutorRegistry;
+import com.conversive.aep.nodes.ExecutorRegistry;
 import com.conversive.aep.support.WireMockToolsIntegrationTest;
 import com.conversive.aep.tools.ToolCallAudit;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -35,7 +35,7 @@ class McpToolExecutorIT extends WireMockToolsIntegrationTest {
     private McpToolExecutor executor;
 
     @Autowired
-    private TypeExecutorRegistry registry;
+    private ExecutorRegistry registry;
 
     @Autowired
     private ToolCallAudit audit;

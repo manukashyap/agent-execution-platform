@@ -1,13 +1,12 @@
 package com.conversive.aep.support;
 
+import com.conversive.aep.dryrun.DryRunExecutorRegistry;
 import com.conversive.aep.engine.activity.CompensationActivity;
 import com.conversive.aep.engine.activity.ExecutionStateActivity;
 import com.conversive.aep.engine.activity.NodeActivity;
 import com.conversive.aep.engine.temporal.TemporalProperties;
 import com.conversive.aep.engine.temporal.WorkflowRegistrar;
 import com.conversive.aep.nodes.ExecutorRegistry;
-import com.conversive.aep.nodes.NodeExecutor;
-import com.conversive.aep.nodes.TypeExecutorRegistry;
 import io.temporal.client.WorkflowClient;
 import io.temporal.testing.TestEnvironmentOptions;
 import io.temporal.testing.TestWorkflowEnvironment;
@@ -53,9 +52,8 @@ public class InProcessTemporal {
 
     @Bean
     @Primary
-    ExecutorRegistry scriptedRegistry(List<NodeExecutor> executors, ScriptedExecutor scripted,
+    ExecutorRegistry scriptedRegistry(DryRunExecutorRegistry real, ScriptedExecutor scripted,
                                       @Value("${test.real-node-types:}") String realTypes) {
-        TypeExecutorRegistry real = new TypeExecutorRegistry(executors);
         Set<String> realSet = Arrays.stream(realTypes.split(",")).map(String::trim).filter(s -> !s.isEmpty())
                 .collect(Collectors.toUnmodifiableSet());
         return ctx -> realSet.contains(ctx.nodeType()) ? real.resolve(ctx) : scripted;

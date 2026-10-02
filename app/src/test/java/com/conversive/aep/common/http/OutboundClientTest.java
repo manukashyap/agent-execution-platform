@@ -81,7 +81,28 @@ class OutboundClientTest {
     void refusesNonAllowListedHostOutsideLiveMode() {
         OutboundRequest dryRun = OutboundRequest.get(URI.create("https://api.example.com/x"), TIMEOUT, ExecutionMode.DRY_RUN);
 
-        assertDenied(dryRun, "not allowed in DRY_RUN");
+        assertDenied(dryRun, "in DRY_RUN mode");
+    }
+
+    @Test
+    void refusesEvenAnAllowListedHostOutsideLiveModeWithoutThePolicysPermit() {
+        wireMock.stubFor(get("/ok").willReturn(okJson("{\"a\":1}")));
+
+        assertDenied(OutboundRequest.get(uri("/ok"), TIMEOUT, ExecutionMode.DRY_RUN), "dry-run policy");
+        assertDenied(OutboundRequest.get(uri("/ok"), TIMEOUT, ExecutionMode.REPLAY), "dry-run policy");
+        assertThat(wireMock.getAllServeEvents()).isEmpty();
+    }
+
+    @Test
+    void thePermitOnlyCoversCallsInsideIt() {
+        wireMock.stubFor(get("/ok").willReturn(okJson("{\"a\":1}")));
+        OutboundRequest dryRun = OutboundRequest.get(uri("/ok"), TIMEOUT, ExecutionMode.DRY_RUN);
+
+        OutboundResponse inside = NonLiveEgress.permit(() -> client.send(dryRun));
+
+        assertThat(inside.status()).isEqualTo(200);
+        assertThat(NonLiveEgress.permitted()).isFalse();
+        assertDenied(dryRun, "dry-run policy");
     }
 
     @Test
@@ -98,10 +119,11 @@ class OutboundClientTest {
     }
 
     @Test
-    void allowListedHostWorksInDryRunAndParsesJson() {
+    void allowListedHostWorksInDryRunWhenThePolicyAllowsItAndParsesJson() {
         wireMock.stubFor(get("/ok").willReturn(okJson("{\"a\":1}")));
 
-        OutboundResponse response = client.send(OutboundRequest.get(uri("/ok"), TIMEOUT, ExecutionMode.DRY_RUN));
+        OutboundResponse response = client.send(OutboundRequest.get(uri("/ok"), TIMEOUT, ExecutionMode.DRY_RUN)
+                .withAllowInNonLive(true));
 
         assertThat(response.status()).isEqualTo(200);
         assertThat(response.body().get("a").asInt()).isEqualTo(1);

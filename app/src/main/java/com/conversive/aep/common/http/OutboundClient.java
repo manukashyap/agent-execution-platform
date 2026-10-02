@@ -42,7 +42,7 @@ public class OutboundClient {
     }
 
     public OutboundResponse send(OutboundRequest request) {
-        policy.check(request.uri(), request.mode(), request.allowInNonLive());
+        policy.check(request.uri(), request.mode(), request.allowInNonLive() || NonLiveEgress.permitted());
         HttpResponse<String> response = exchange(toHttpRequest(request));
         OutboundResponse result = new OutboundResponse(
                 response.statusCode(), response.headers().map(), parse(response.body()));

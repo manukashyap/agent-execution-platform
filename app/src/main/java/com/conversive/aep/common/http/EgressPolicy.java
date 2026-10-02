@@ -12,7 +12,8 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * SSRF and mode-aware egress rules for {@link OutboundClient}. The address check resolves the host
+ * SSRF and mode-aware egress rules for {@link OutboundClient}. Outside {@code LIVE} a request goes out only when
+ * the dry-run policy allowed it (request flag or {@link NonLiveEgress} permit), allow-listed hosts included. The address check resolves the host
  * before the call; DNS rebinding between check and connect is an accepted prototype gap.
  */
 public final class EgressPolicy {
@@ -37,10 +38,10 @@ public final class EgressPolicy {
         if (matches(selfHosts, uri)) {
             throw denied("calls to the platform's own host are refused");
         }
-        boolean allowListed = matches(allowHosts, uri);
-        if (mode != ExecutionMode.LIVE && !allowListed && !allowInNonLive) {
-            throw denied("host not allowed in " + mode + " mode: " + host);
+        if (mode != ExecutionMode.LIVE && !allowInNonLive) {
+            throw denied("egress not allowed by the dry-run policy in " + mode + " mode: " + host);
         }
+        boolean allowListed = matches(allowHosts, uri);
         if (!allowListed) {
             requirePublicAddress(host);
         }
