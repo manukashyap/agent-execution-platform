@@ -104,8 +104,7 @@ public class NodeActivityImpl implements NodeActivity {
         boolean cancelled = HeartbeatingRunner.isCancellation(e) && !timedOut;
         String code = timedOut ? ErrorCodes.TIMEOUT : cancelled ? ErrorCodes.CANCELLED : ErrorCodeOf.code(e);
         try {
-            runs.finished(key, cancelled ? NodeStatus.CANCELLED.name() : NodeStatus.FAILED.name(), code,
-                    e.getMessage(), clock.instant());
+            runs.finished(key, failedStatus(cancelled, code).name(), code, e.getMessage(), clock.instant());
         } catch (RuntimeException dbError) {
             log.warn("could not record the failure of node {} of {}", key.nodeId(), key.executionId(), dbError);
         }
@@ -116,8 +115,16 @@ public class NodeActivityImpl implements NodeActivity {
         boolean cancelled = HeartbeatingRunner.isCancellation(failure);
         if (cancelled || ActivityTelemetry.isFinalAttempt(info, failure)) {
             telemetry.nodeCompleted(info, task.tenantId(), task.workflowId(), task.nodeType(),
-                    cancelled ? NodeStatus.CANCELLED.name() : NodeStatus.FAILED.name());
+                    failedStatus(cancelled, ErrorCodeOf.code(failure)).name());
         }
+    }
+
+    /** A ledger effect with an unknown outcome is not a plain failure: the node needs a human (06 §4.9). */
+    static NodeStatus failedStatus(boolean cancelled, String code) {
+        if (cancelled) {
+            return NodeStatus.CANCELLED;
+        }
+        return ErrorCodes.NEEDS_ATTENTION.equals(code) ? NodeStatus.NEEDS_ATTENTION : NodeStatus.FAILED;
     }
 
     private String write(JsonNode output) {

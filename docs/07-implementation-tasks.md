@@ -314,8 +314,8 @@ Each cut = one README line + its design-doc section, committed as `docs: cut <it
 | P2a ★ | D1·3 | 4.00 | ✅ | ✅ | T2a.1–T2a.7 green (335 tests): 10 DagInterpreterIT scenarios, CAS race, http mapping; `happy-path.sh` green; engine metrics wired |
 | P2b | D1·4 | 0.75 | ✅ | ✅ Checkpoint A pending review | SagaIT: exactly one refund, in-flight sibling, terminal CAS kept, refund-fails → COMPENSATION_FAILED; `saga-charge-then-send.sh` |
 | Doc skeleton ★ | D1·5 | 0.50 | ✅ | ✅ | `docs/design.md` drafted (≈3.6 k words, trim ~600 in P10) |
-| P5 ★ | D2·1 | 1.50 | 🟡 | ☐ | T5.1/T5.2/T5.4 guard-level + mocks T5.3 done (ledger ITs green); engine-level §9 tests + walkthrough wait on P2a |
-| P3 ★ | D2·2 | 1.50 | 🟡 | ☐ | T3.1–T3.4 green (72 router tests + LlmExecutorIT); `vllm-degradation.sh` written, not yet run end-to-end |
+| P5 ★ | D2·1 | 1.50 | ✅ | ✅ | `SideEffectEngineIT` (06 §4.9 tests 1/2/3/5; 4 in `SagaIT`); `failure-walkthrough.sh` 5/5 OK; 380 tests green. 5× flake run pending (P9 agent) |
+| P3 ★ | D2·2 | 1.50 | ✅ | ✅ | `vllm-degradation.sh` green: DEGRADED ≈26 s after +3 s latency, HEALTHY ≈46 s after restore (driver RATE 120 ≈ 55 req/s) |
 | P4 | D2·3 | 1.25 | ✅ | ✅ | T4.1–T4.5 green (200 tests); gateway + `mcp` node + LLM tool round (READ_ONLY, ≤3 calls, untrusted tool output); `/v1/tools` behind auth |
 | P6 ★ | D2·4 | 0.75 | ☐ | ☐ Checkpoint B | |
 | P7 | D2·5 | 0.75 | ☐ | ☐ | |

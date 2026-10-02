@@ -78,16 +78,19 @@ final class SagaRun {
             try {
                 result = compensate(step);
             } catch (ActivityFailure e) {
-                failed = firstOf(failed, failure(step, ForwardRun.codeOf(e), "failed: " + messageOf(e)));
+                failed = firstOf(failed, failure(step, ExecutionStatus.COMPENSATION_FAILED, ForwardRun.codeOf(e),
+                        "failed: " + messageOf(e)));
                 continue;
             }
             if (result.result() == Result.COMPENSATED) {
                 compensated = true;
             } else if (result.result() == Result.PIVOT_EXECUTED) {
-                return firstOf(failed, failure(step, ErrorCodes.NEEDS_ATTENTION, "stopped: " + result.reason()));
+                return firstOf(failed, failure(step, ExecutionStatus.COMPENSATION_FAILED, ErrorCodes.NEEDS_ATTENTION,
+                        "stopped: " + result.reason()));
             } else if (result.result() == Result.NEEDS_ATTENTION) {
-                failed = firstOf(failed, failure(step, ErrorCodes.NEEDS_ATTENTION, "needs attention: "
-                        + result.reason()));
+                // An unknown forward outcome is never compensated blindly; a human must reconcile it.
+                failed = firstOf(failed, failure(step, ExecutionStatus.NEEDS_ATTENTION, ErrorCodes.NEEDS_ATTENTION,
+                        "needs attention: " + result.reason()));
             }
         }
         if (failed != null) {
@@ -106,8 +109,8 @@ final class SagaRun {
         return stub.compensate(task);
     }
 
-    private static ExecutionResult failure(Step step, String code, String detail) {
-        return new ExecutionResult(ExecutionStatus.COMPENSATION_FAILED, code,
+    private static ExecutionResult failure(Step step, ExecutionStatus status, String code, String detail) {
+        return new ExecutionResult(status, code,
                 "compensation of " + step.node().id() + " " + detail);
     }
 
