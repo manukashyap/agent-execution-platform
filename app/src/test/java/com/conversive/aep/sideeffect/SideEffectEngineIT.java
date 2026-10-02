@@ -208,9 +208,9 @@ class SideEffectEngineIT extends PostgresIntegrationTest {
         assertThat(ledgerState(id, "notify")).isEqualTo("UNKNOWN");
     }
 
-    /** Test 5: the UNKNOWN send is not compensated blindly; the committed charge before it still is, once. */
+    /** Test 5: the UNKNOWN pivot send is not compensated blindly and stops the walk: the charge before it stays. */
     @Test
-    void anUnknownForwardEffectGetsNoBlindCompensation() {
+    void anUnknownPivotStopsTheSagaWalkAndLeavesEarlierEffectsAlone() {
         String base = WIRE_MOCK.baseUrl();
         h.publish("""
                 {"workflow_id":"unknown_fx","version":1,"nodes":[
@@ -233,7 +233,7 @@ class SideEffectEngineIT extends PostgresIntegrationTest {
         assertThat(requests("/mcp")).hasSize(1);
         assertThat(requests("/recall")).isEmpty();
         assertThat(PROVIDER.performedEffects()).isEqualTo(1);
-        assertThat(requests("/refund")).hasSize(1);
+        assertThat(requests("/refund")).isEmpty();
     }
 
     private String chargeOnly(String workflowId) {

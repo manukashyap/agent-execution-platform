@@ -21,7 +21,7 @@ import java.util.Set;
  * The linear saga (06 §4.4 P2b). After a failed, cancelled or timed-out forward pass, every started call of a
  * compensatable or pivot node is reconciled and compensated in reverse start order, in a detached scope so a
  * cancel cannot interrupt it. A failing compensation does not stop the walk (continue-with-error); an executed
- * pivot does, because nothing before it may be rolled back.
+ * or possibly executed (unknown outcome) pivot does, because nothing before it may be rolled back.
  */
 final class SagaRun {
 
@@ -91,6 +91,10 @@ final class SagaRun {
                 // An unknown forward outcome is never compensated blindly; a human must reconcile it.
                 failed = firstOf(failed, failure(step, ExecutionStatus.NEEDS_ATTENTION, ErrorCodes.NEEDS_ATTENTION,
                         "needs attention: " + result.reason()));
+                if (step.node().pivot()) {
+                    // The pivot may have executed, so nothing before it may be rolled back.
+                    return failed;
+                }
             }
         }
         if (failed != null) {
