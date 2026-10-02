@@ -12,6 +12,7 @@ import com.conversive.aep.definition.StoredDefinition;
 import com.conversive.aep.definition.model.DefinitionCodec;
 import com.conversive.aep.definition.model.FrozenDefinition;
 import com.conversive.aep.engine.ExecutionLauncher;
+import com.conversive.aep.engine.RunAlreadyClosedException;
 import com.conversive.aep.engine.workflow.ExecutionRequest;
 import com.conversive.aep.execution.ExecutionStatus;
 import com.conversive.aep.execution.persistence.ExecutionRecord;
@@ -123,20 +124,13 @@ public class ExecutionService {
     private void launch(NewExecution row, FrozenDefinition frozen, StartCommand cmd) {
         ExecutionRequest request = new ExecutionRequest(row.tenantId(), row.id(), frozen, row.input(), cmd.mode(),
                 cmd.dryRun(), cmd.priority(), row.deadlineAt().toEpochMilli());
-        try {
-            launcher.start(request);
-        } catch (RetryableError e) {
-            log.warn("execution {} could not be started: {}", row.id(), e.getMessage());
-            executions.cas(row.tenantId(), row.id(), EnumSet.of(ExecutionStatus.QUEUED), ExecutionStatus.START_FAILED,
-                    StatusUpdate.failure(clock.instant(), e.code(), e.getMessage()));
-            throw e;
-        }
+        startOrRecord(request);
     }
 
     /**
      * Idempotent replay of a request whose start failed: re-attempts the Temporal start with the same execution
-     * id. The row goes back to QUEUED first (the workflow only starts from QUEUED) and returns to START_FAILED
-     * when the start fails again.
+     * id. The row goes back to QUEUED first and returns to START_FAILED when the start fails again. A run that
+     * Temporal did accept despite the error moves a START_FAILED row to RUNNING by itself.
      */
     private ExecutionRecord relaunch(ExecutionRecord row, StartCommand cmd) {
         StoredDefinition stored = definitions.get(row.tenantId(), row.workflowId(), row.defVersion());
@@ -148,15 +142,30 @@ public class ExecutionService {
         }
         ExecutionRequest request = new ExecutionRequest(row.tenantId(), row.id(), frozen, row.input(), row.mode(),
                 cmd.dryRun(), row.priority(), row.deadlineAt().toEpochMilli());
+        startOrRecord(request);
+        return require(row.tenantId(), row.id());
+    }
+
+    /**
+     * Starts the run for a QUEUED row. A failed start moves the row to START_FAILED and rethrows. A run that
+     * Temporal accepted earlier and that has since closed is recorded as the row's terminal outcome, because no
+     * worker will ever move the row out of QUEUED.
+     */
+    private void startOrRecord(ExecutionRequest request) {
+        TenantId tenant = request.tenantId();
+        ExecutionId id = request.executionId();
         try {
             launcher.start(request);
         } catch (RetryableError e) {
-            log.warn("execution {} could not be restarted: {}", row.id(), e.getMessage());
-            executions.cas(row.tenantId(), row.id(), EnumSet.of(ExecutionStatus.QUEUED), ExecutionStatus.START_FAILED,
+            log.warn("execution {} could not be started: {}", id, e.getMessage());
+            executions.cas(tenant, id, EnumSet.of(ExecutionStatus.QUEUED), ExecutionStatus.START_FAILED,
                     StatusUpdate.failure(clock.instant(), e.code(), e.getMessage()));
             throw e;
+        } catch (RunAlreadyClosedException closed) {
+            log.warn("execution {} found its engine run already closed: {}", id, closed.getMessage());
+            executions.cas(tenant, id, EnumSet.of(ExecutionStatus.QUEUED), closed.outcome(),
+                    StatusUpdate.failure(clock.instant(), ErrorCodes.START_FAILED, closed.getMessage()));
         }
-        return require(row.tenantId(), row.id());
     }
 
     private ExecutionRecord sameWorkflow(ExecutionRecord existing, StartCommand cmd) {

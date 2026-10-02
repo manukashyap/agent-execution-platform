@@ -11,6 +11,7 @@ public interface ExecutionLauncher {
      * Starts the run, or attaches to it if it already exists; safe to call twice for one execution.
      *
      * @throws com.conversive.aep.common.RetryableError {@code START_FAILED} when the engine is unreachable
+     * @throws RunAlreadyClosedException when the run was started earlier and has already closed
      */
     void start(ExecutionRequest request);
 
