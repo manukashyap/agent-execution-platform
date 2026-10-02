@@ -47,3 +47,34 @@ aep:
     dev:
       dev-api-key: ${AEP_DEV_API_KEY:}
       other-api-key: ${AEP_DEV_OTHER_API_KEY:}
+  router:
+    # cost is USD per 1,000 tokens (prompt + completion); rps = token-bucket capacity and refill per second
+    providers:
+      llm-a:
+        base-url: ${AEP_LLM_A_URL:http://localhost:8090/llm/llm-a}
+        model: model-a
+        nominal-latency: 200ms
+        cost-per-thousand-tokens-usd: 0.010
+        rps: 100
+        capabilities: [chat, tools, json]
+      llm-b:
+        base-url: ${AEP_LLM_B_URL:http://localhost:8090/llm/llm-b}
+        model: model-b
+        nominal-latency: 500ms
+        cost-per-thousand-tokens-usd: 0.004
+        rps: 500
+        capabilities: [chat, tools, json]
+      vllm:
+        base-url: ${AEP_VLLM_URL:http://localhost:8090/llm/vllm}
+        model: vllm-default
+        nominal-latency: 100ms
+        cost-per-thousand-tokens-usd: 0.002
+        rps: 200
+        capabilities: [chat, json]
+    spill:
+      from: vllm
+      high-to: llm-a
+      default-to: llm-b
+    no-provider-retry-delay: 1s
+    # tenant-allow-list:
+    #   "[t_other]": [llm-b, vllm]   # tenants not listed may use every provider
