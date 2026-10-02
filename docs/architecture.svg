@@ -75,7 +75,7 @@ text{font-family:Helvetica,Arial,sans-serif}
 <rect class="hi" x="165" y="398" width="190" height="56" rx="6"/>
 <text class="t" x="260.0" y="415" text-anchor="middle">SideEffectGuard</text>
 <text class="s" x="260.0" y="430" text-anchor="middle">ledger: effect key, state,</text>
-<text class="s" x="260.0" y="443" text-anchor="middle">reconciler (exactly-once)</text>
+<text class="s" x="260.0" y="443" text-anchor="middle">reconciler (effectively-once)</text>
 <rect class="hi" x="370" y="398" width="195" height="56" rx="6"/>
 <text class="t" x="467.5" y="415" text-anchor="middle">LlmRouter</text>
 <text class="s" x="467.5" y="430" text-anchor="middle">priority scorer, token buckets</text>
