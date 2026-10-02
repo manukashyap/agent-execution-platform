@@ -38,7 +38,7 @@
 | **C. Side effects** | `sideeffect`, `tools` (registry) | P5 | ✅ |
 | **D. AI & tools** | `router`, `tools` (gateway), `nodes` (llm, mcp) | P3, P4 | router degradation ✅ · AI tool round cut-list #3 |
 | **E. Dry-run** | `dryrun` | P6 | ✅ |
-| **F. Tenancy & cost** | `tenancy`, `cost` | P7 | cut-list #2 |
+| **F. Tenancy & cost** | `tenancy`, `cost` | P7 | cut-list #2 |  | 🟡 | 🟡 | T7.1–T7.3 green (293 tests): token bucket + soft cap 429s, V5 TCC budgets (50→10 exact), Temporal priority + fairness key; engine-level forEach budget test waits on P2a |
 | **G. Observability** | `observability`, `/trace` | P8 | cut-list #1 |
 | **H. Proof & docs** | `loadtest/`, `scripts/`, `docs/` | D1·5, P9, P10 + one demo script per phase | load numbers + design PDF ✅ |
 
