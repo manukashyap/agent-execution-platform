@@ -160,3 +160,26 @@ P7 (tenancy and cost, T7.1–T7.3) deviations and assumptions:
   - `TemporalExecutionLauncher` keeps its 4-arg constructor, which uses `TemporalPriorityPolicy.uniform()`; Spring uses the 5-arg one.
 - **Test fixture:** `LlmExecutorIT` now inserts its tenant row, because budget rows have an FK to `tenant`.
 - **Load tests:** new tenants get `rate_per_sec` 10 / `burst` 20 by default. Load-test tenants need their `tenant_limits` raised (P9).
+
+P8 (observability, T8.1/T8.2) deviations and assumptions:
+
+- **No tenant_id label anywhere.** The tier comes from `CachedTenantTiers`, the same 30s cache the priority policy uses. `MetricsPrometheusIT` scans `/actuator/prometheus` to check this. The per-tenant view is the `/trace` endpoint.
+- **queue_depth** is a gauge refreshed every `aep.observability.queue-depth.refresh` (10s) by `QueueDepthMonitor`. It has a `source` label and no tenant_tier:
+  - `temporal_workflow` and `temporal_activity`: DescribeTaskQueue backlog, 2s deadline.
+  - `admission_queued`: a global `count(*)` of QUEUED executions. This is a deliberate cross-tenant query; it returns no tenant data.
+  - Refresh failures keep the last value. The first failure is warned; later ones are logged at debug.
+- **Extra meters beyond the PDF list:**
+  - `tool_call_latency{provider=<tool>, outcome}`
+  - `schedule_to_start{tenant_tier}`
+  - `admission_rejections{tenant_tier, reason}`
+  - `budget_rejections{tenant_tier, reason}`
+- **Tool labels:** tools go in the `provider` label. LLM and tool errors share `provider_errors_total{provider, error_class}`. The tool label is set only after authorisation, so an unvetted tool name never becomes a label.
+- **side_effect_unknown** counts only the PENDING→UNKNOWN transition in the guard. The reconciler's NEEDS_ATTENTION is not counted.
+- **Engine-owned meters:** `executionCompleted`, `nodeCompleted`, `nodeRetried`, `compensation` and `scheduleToStart` are exposed on `AepMetrics`. Their call sites live in engine.activity / execution.*, which are owned by the P2 agent.
+- **Trace endpoint:**
+  - It replaces the P1 501 stub. It reads all its tables in one REPEATABLE READ read-only transaction.
+  - Nodes are keyed by (nodeId, callIndex, phase). LLM calls attach to FORWARD.
+  - Node types come from the pinned definition spec; anything not in it is `unknown`.
+  - `llmFallbacks` counts calls with seq > 0.
+  - Budget totals are the per-execution reservation sums (reserved = still RESERVED).
+- **`TemporalTaskQueueBacklog`** has no dedicated test. The DescribeTaskQueue API was verified in T0.7.
