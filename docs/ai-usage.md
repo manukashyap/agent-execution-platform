@@ -203,3 +203,7 @@ P8 (observability, T8.1/T8.2) deviations and assumptions:
   - `nodeCompleted` fires on success, or on a failure that is final (non-retryable, cancelled, or the last attempt). Its latency is measured from the first schedule.
   - `nodeRetried` and `scheduleToStart` fire at activity entry.
   - `compensation` fires per step: COMPENSATED becomes SUCCEEDED; NEEDS_ATTENTION, PIVOT_EXECUTED or a final failure become FAILED; SKIPPED is not counted.
+
+### Checkpoint A fixes
+
+- **node_run closes exactly once (supersedes "Orphaned RUNNING rows" above):** a row leaves RUNNING once; later writes to it are no-ops. A new attempt closes earlier RUNNING attempts as FAILED/`TIMEOUT`. When an attempt fails without an ApplicationFailure (StartToClose, heartbeat timeout, worker death), the interpreter closes the node's RUNNING rows. An attempt whose heartbeat finds it gone (`ActivityNotExistsException`) records FAILED/`TIMEOUT`, not CANCELLED.
