@@ -9,6 +9,9 @@ class NonDeterministicWorkflow {
 
     String run() {
         new Thread(() -> { }).start();
-        return StringUtils.capitalize(Instant.now() + UUID.randomUUID().toString());
+        Object impl = com.conversive.aep.engine.activity.NodeActivityImpl.class;
+        java.util.Collections.shuffle(new java.util.ArrayList<String>());
+        String env = System.getenv("HOME") + System.getProperty("user.dir") + new java.util.Date() + impl;
+        return StringUtils.capitalize(env + Instant.now() + UUID.randomUUID().toString());
     }
 }

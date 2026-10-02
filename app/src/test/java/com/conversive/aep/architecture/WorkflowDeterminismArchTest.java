@@ -21,7 +21,8 @@ class WorkflowDeterminismArchTest {
 
     static Stream<ArchRule> rules() {
         return Stream.of(DeterminismRules.ONLY_WORKFLOW_SAFE_DEPENDENCIES,
-                DeterminismRules.NO_INFRASTRUCTURE, DeterminismRules.NO_NONDETERMINISM);
+                DeterminismRules.NO_INFRASTRUCTURE, DeterminismRules.NO_NONDETERMINISM,
+                DeterminismRules.NO_ACTIVITY_IMPLEMENTATIONS);
     }
 
     @ParameterizedTest
