@@ -121,7 +121,7 @@ class CompensationLookupIT extends PostgresIntegrationTest {
 
     private static final String UPSERT_THEN_FAIL = """
             {"workflow_id":"%s","version":1,"nodes":[
-              {"id":"upsert","type":"mcp","timeout_s":2,"retry":{"max_attempts":1},
+              {"id":"upsert","type":"mcp","timeout_s":2,"schedule_to_close_s":9,"retry":{"max_attempts":3},
                "config":{"tool":"crm.upsert","args":{"external_ref":"lead_9","name":"Ada","email":"a@example.com"}},
                "compensate":{"type":"mcp","config":{"tool":"crm.delete","args":{"external_ref":"lead_9"}}}},
               {"id":"boom","type":"http","depends_on":["upsert"],"retry":{"max_attempts":1},
@@ -208,7 +208,7 @@ class CompensationLookupIT extends PostgresIntegrationTest {
                    "config":{"method":"POST","url":"%s/charge","body":{"amount":42}},
                    "compensate":{"type":"http","config":{"method":"POST","url":"%s/refund"}}},
                   {"id":"upsert","type":"mcp","depends_on":["charge"],"pivot":true,"timeout_s":2,
-                   "retry":{"max_attempts":2,"initial_interval_ms":50},
+                   "schedule_to_close_s":9,"retry":{"max_attempts":3,"initial_interval_ms":50},
                    "config":{"tool":"crm.upsert","args":{"external_ref":"lead_9","name":"Ada","email":"a@example.com"}}}]}
                 """.formatted(WIRE_MOCK.baseUrl(), WIRE_MOCK.baseUrl()));
         ExecutionId id = h.start("pivot_lk");
