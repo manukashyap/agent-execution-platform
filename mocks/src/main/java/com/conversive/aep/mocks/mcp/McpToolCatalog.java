@@ -19,13 +19,13 @@ final class McpToolCatalog {
                         schema(Map.of("charge_id", "string"), List.of("charge_id"))),
                 tool("messaging.send", "Send a message (not idempotent).",
                         schema(Map.of("to", "string", "body", "string"), List.of("to", "body"))),
-                tool("crm.upsert", "Create a CRM contact (not idempotent; duplicates possible).",
+                tool("crm.upsert", "Create or update a CRM contact by external_ref; the Idempotency-Key is stored on the record and the result says whether it was created.",
                         schema(Map.of("external_ref", "string", "name", "string", "email", "string", "label", "string"),
                                 List.of("external_ref", "name", "email"))),
-                tool("crm.get", "Look up CRM contacts by external reference.",
-                        schema(Map.of("external_ref", "string"), List.of("external_ref"))),
-                tool("crm.delete", "Delete every CRM contact with an external reference (inverse of crm.upsert).",
-                        schema(Map.of("external_ref", "string"), List.of("external_ref"))),
+                tool("crm.get", "Look up CRM contacts by external reference; optional effect_key limits it to contacts written by that effect.",
+                        schema(Map.of("external_ref", "string", "effect_key", "string"), List.of("external_ref"))),
+                tool("crm.delete", "Delete the CRM contact with an external reference, optionally only if written by effect_key (inverse of crm.upsert).",
+                        schema(Map.of("external_ref", "string", "effect_key", "string"), List.of("external_ref"))),
                 tool("leads.fetch", "Fetch leads (read-only).",
                         schema(Map.of("limit", "integer"), List.of())));
     }

@@ -7,11 +7,18 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.Stream;
 import org.springframework.stereotype.Service;
 
-/** Non-idempotent CRM: every upsert creates a new record, duplicates are the point. */
+/**
+ * Non-idempotent CRM. The REST {@code POST /crm/contacts} always creates (duplicates are the point). The MCP
+ * {@code crm.upsert} is a real upsert keyed by {@code external_ref}: it stores the caller's effect key (the
+ * {@code Idempotency-Key} header) on the record and reports whether it {@code created} the record or updated a
+ * pre-existing one, so a caller can scope lookups and deletes to what its own effect wrote.
+ */
 @Service
 public class CrmService implements Resettable {
 
@@ -23,7 +30,7 @@ public class CrmService implements Resettable {
                                  String label) {
     }
 
-    private record Contact(String contactId, ContactRequest request) {
+    private record Contact(String contactId, ContactRequest request, String effectKey, boolean created) {
         Map<String, Object> detail() {
             Map<String, Object> out = new LinkedHashMap<>();
             out.put("contact_id", contactId);
@@ -31,7 +38,23 @@ public class CrmService implements Resettable {
             out.put("name", request.name());
             out.put("email", request.email());
             out.put("label", request.label());
+            out.put("effect_key", effectKey);
+            out.put("created", created);
             return out;
+        }
+
+        Map<String, Object> outcome() {
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("contact_id", contactId);
+            out.put("external_ref", request.externalRef());
+            out.put("created", created);
+            out.put("effect_key", effectKey);
+            return out;
+        }
+
+        /** A null key matches everything (unscoped lookup or delete). */
+        boolean writtenBy(String key) {
+            return key == null || key.equals(effectKey);
         }
     }
 
@@ -43,20 +66,42 @@ public class CrmService implements Resettable {
         this.controls = controls;
     }
 
+    /** REST create: always a new record. */
     public Map<String, Object> create(ContactRequest request) {
         controls.enter(UPSERT_ROUTE);
-        if (isBlank(request.externalRef()) || isBlank(request.name()) || isBlank(request.email())) {
-            throw new MockHttpException(400, "invalid_request");
-        }
-        Contact contact = new Contact("ct_%06d".formatted(seq.incrementAndGet()), request);
+        validate(request);
+        Contact contact = new Contact(nextId(), request, null, true);
         contacts.put(contact.contactId(), contact);
         return Map.of("contact_id", contact.contactId());
     }
 
-    public Map<String, Object> findByExternalRef(String externalRef) {
+    /**
+     * MCP upsert. Replaying the same {@code effectKey} returns the original outcome without another write; a
+     * different key updates the existing record for the ref (reported as {@code created=false}) or creates one.
+     */
+    public synchronized Map<String, Object> upsert(ContactRequest request, String effectKey) {
+        controls.enter(UPSERT_ROUTE);
+        validate(request);
+        if (effectKey != null) {
+            Optional<Contact> replay = byExternalRef(request.externalRef())
+                    .filter(c -> effectKey.equals(c.effectKey()))
+                    .findFirst();
+            if (replay.isPresent()) {
+                return replay.get().outcome();
+            }
+        }
+        Contact written = byExternalRef(request.externalRef()).findFirst()
+                .map(c -> new Contact(c.contactId(), request, effectKey, false))
+                .orElseGet(() -> new Contact(nextId(), request, effectKey, true));
+        contacts.put(written.contactId(), written);
+        return written.outcome();
+    }
+
+    /** @param effectKey when non-null, only a contact written by that effect counts as found */
+    public Map<String, Object> findByExternalRef(String externalRef, String effectKey) {
         controls.enter(GET_ROUTE);
-        List<Map<String, Object>> found = contacts.values().stream()
-                .filter(c -> c.request().externalRef().equals(externalRef))
+        List<Map<String, Object>> found = byExternalRef(externalRef)
+                .filter(c -> c.writtenBy(effectKey))
                 .map(Contact::detail)
                 .toList();
         return Map.of("contacts", found);
@@ -70,11 +115,14 @@ public class CrmService implements Resettable {
         return Map.of("deleted", true);
     }
 
-    /** MCP {@code crm.delete} (crm.upsert's inverse): removes every contact with the ref; repeating it is a no-op. */
-    public Map<String, Object> deleteByExternalRef(String externalRef) {
+    /**
+     * MCP {@code crm.delete} (crm.upsert's inverse): removes the contact with the ref; with an {@code effectKey}
+     * only a contact that effect wrote. Repeating it is a no-op.
+     */
+    public Map<String, Object> deleteByExternalRef(String externalRef, String effectKey) {
         controls.enter(DELETE_ROUTE);
-        List<String> ids = contacts.values().stream()
-                .filter(c -> c.request().externalRef().equals(externalRef))
+        List<String> ids = byExternalRef(externalRef)
+                .filter(c -> c.writtenBy(effectKey))
                 .map(Contact::contactId)
                 .toList();
         long removed = ids.stream().filter(id -> contacts.remove(id) != null).count();
@@ -89,6 +137,20 @@ public class CrmService implements Resettable {
     public void reset() {
         contacts.clear();
         seq.set(0);
+    }
+
+    private Stream<Contact> byExternalRef(String externalRef) {
+        return contacts.values().stream().filter(c -> c.request().externalRef().equals(externalRef));
+    }
+
+    private String nextId() {
+        return "ct_%06d".formatted(seq.incrementAndGet());
+    }
+
+    private static void validate(ContactRequest request) {
+        if (isBlank(request.externalRef()) || isBlank(request.name()) || isBlank(request.email())) {
+            throw new MockHttpException(400, "invalid_request");
+        }
     }
 
     private static boolean isBlank(String s) {

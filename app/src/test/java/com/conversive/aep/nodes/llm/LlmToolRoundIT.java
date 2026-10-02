@@ -136,7 +136,7 @@ class LlmToolRoundIT extends WireMockToolsIntegrationTest {
         assertThat(WIRE_MOCK.findAll(com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor(
                 urlEqualTo("/mcp")))).isEmpty();
         assertThat(result.output().path("tool_results").get(0).path("result")).isNotEqualTo(mapper.readTree(CONTACTS));
-        assertThat(result.output().path("tool_results").get(0).path("result").path("name").asText())
+        assertThat(result.output().path("tool_results").get(0).path("result").path("contacts").path(0).path("name").asText())
                 .isEqualTo("Dry Run");
     }
 

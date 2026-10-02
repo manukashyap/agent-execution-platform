@@ -1,5 +1,6 @@
 package com.conversive.aep.tools.mcp;
 
+import com.conversive.aep.common.EffectKey;
 import com.conversive.aep.common.ErrorCodes;
 import com.conversive.aep.common.IdempotencyMode;
 import com.conversive.aep.common.NonRetryableError;
@@ -161,6 +162,9 @@ public class McpToolGateway implements ToolGateway {
             }
             ObjectNode scope = JsonNodeFactory.instance.objectNode();
             scope.set("args", inv.args());
+            // Execution-scoped: only a record written under this effect's key counts as "our" effect.
+            scope.put("effect_key", EffectKey.of(inv.tenantId(), inv.executionId(), inv.nodeId(), inv.phase(),
+                    inv.callIndex()).value());
             JsonNode args = JsonTemplate.render(spec.path("args"), scope);
             return firstMatch(call(spec.get("tool").asText(), inv, args, null, timeout));
         }

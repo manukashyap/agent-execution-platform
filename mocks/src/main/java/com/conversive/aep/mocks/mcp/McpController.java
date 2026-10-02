@@ -90,11 +90,17 @@ public class McpController {
             case "payments.charge" -> payments.charge(key, mapper.treeToValue(arguments, PaymentsService.ChargeRequest.class));
             case "payments.refund" -> payments.refund(key, mapper.treeToValue(arguments, PaymentsService.RefundRequest.class));
             case "messaging.send" -> messaging.send(mapper.treeToValue(arguments, MessagingService.SendRequest.class));
-            case "crm.upsert" -> crm.create(mapper.treeToValue(arguments, CrmService.ContactRequest.class));
-            case "crm.get" -> crm.findByExternalRef(requiredText(arguments, "external_ref"));
-            case "crm.delete" -> crm.deleteByExternalRef(requiredText(arguments, "external_ref"));
+            case "crm.upsert" -> crm.upsert(mapper.treeToValue(arguments, CrmService.ContactRequest.class), key);
+            case "crm.get" -> crm.findByExternalRef(requiredText(arguments, "external_ref"),
+                    optionalText(arguments, "effect_key"));
+            case "crm.delete" -> crm.deleteByExternalRef(requiredText(arguments, "external_ref"),
+                    optionalText(arguments, "effect_key"));
             default -> leads.fetch(arguments.has("limit") ? arguments.get("limit").asInt() : null);
         };
+    }
+
+    private static String optionalText(JsonNode arguments, String field) {
+        return arguments.path(field).isTextual() ? arguments.get(field).asText() : null;
     }
 
     private static String requiredText(JsonNode arguments, String field) {

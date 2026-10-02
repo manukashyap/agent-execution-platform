@@ -27,7 +27,7 @@ public class CrmController {
 
     @GetMapping
     public Map<String, Object> find(@RequestParam("external_ref") String externalRef) {
-        return crm.findByExternalRef(externalRef);
+        return crm.findByExternalRef(externalRef, null);
     }
 
     @DeleteMapping("/{id}")
