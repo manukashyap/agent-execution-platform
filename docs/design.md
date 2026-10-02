@@ -68,7 +68,7 @@ All tables carry `tenant_id`. Migrations V1 core, V2 tools and ledger, V3 `llm_c
 | New version mid-run | In-flight run keeps frozen v3; new executions pin v4; interpreter changes via `getVersion` | [B] test |
 | Rate-limited API (429) | Retryable, `Retry-After` as `nextRetryDelay`, counts toward `maxAttempts`; per-provider token buckets avoid the limit | [B] script |
 
-**Saga [P].** The registry declares reversibility (`COMPENSATABLE, PIVOT, RETRIABLE, READ_ONLY`). On failure, cancel or deadline the interpreter cancels in-flight work, waits for it to settle, then reconciles-then-compensates every compensatable node with a ledger row in reverse completion order, in a detached scope. An UNKNOWN forward effect is never compensated blindly; an executed pivot ends `COMPENSATION_FAILED` plus audit. Diamond-aware parallel compensation is [D].
+**Saga [P].** The registry declares reversibility (`COMPENSATABLE, PIVOT, RETRIABLE, READ_ONLY`). On failure, cancel or deadline the interpreter cancels in-flight work, waits for it to settle, then reconciles-then-compensates every compensatable node with a ledger row in reverse start order, in a detached scope. An UNKNOWN forward effect is never compensated blindly; an executed pivot ends `COMPENSATION_FAILED` plus audit. Diamond-aware parallel compensation is [D].
 
 ## 6. Scaling strategy [P]
 

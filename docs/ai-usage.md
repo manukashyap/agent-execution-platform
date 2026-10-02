@@ -233,3 +233,9 @@ P8 (observability, T8.1/T8.2) deviations and assumptions:
 - **Workflow shape:** the forEach node is an http call (CRM mock) rather than an LLM call, because router provider rps (llm-a 100, llm-b 500, vllm 200) would cap a 10x fan-out of LLM calls at about 80 executions/s and the test would measure the router, not the engine. One LLM node (`classify`) per execution keeps the router/budget path in the picture.
 - **Outcome:** the saturation knee is about 25 executions/s on this laptop, limited by Temporal + its Postgres, not by the app. Details and the 10x plan are in `loadtest/RESULTS.md`; raw captures are in `loadtest/results/`.
 - **Flake gate:** `SideEffectEngineIT` passed 5 of 5 consecutive runs (4 tests each, no flake, no change made).
+
+### Final-review corrections (2026-10-02)
+
+- **Correction to the P7 "no stale-reservation reaper" note:** that note is out of date. `cost.BudgetReservationReaper` was added at Checkpoint A (see "Budget reservation reaper" above) and cancels RESERVED rows older than `aep.cost.reaper.interval`'s `max-age` (15 min). A period rollover job is still design-only.
+- **Override, unknown pivot stops the saga walk:** when a pivot node's forward effect is UNKNOWN (NEEDS_ATTENTION), `SagaRun.walk` now stops immediately and does not compensate earlier steps, because the pivot may have taken effect and undoing its predecessors could leave the system inconsistent. The run ends NEEDS_ATTENTION for an operator. Before this, the walk continued past it and refunded earlier effects.
+- **Saga order:** compensation runs in reverse start order, not reverse completion order (docs/design.md corrected).
