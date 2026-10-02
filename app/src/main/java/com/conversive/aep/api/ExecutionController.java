@@ -3,9 +3,7 @@ package com.conversive.aep.api;
 import com.conversive.aep.api.auth.RequiresScope;
 import com.conversive.aep.api.dto.ExecutionView;
 import com.conversive.aep.api.dto.NodeRunView;
-import com.conversive.aep.common.ErrorCodes;
 import com.conversive.aep.common.ExecutionId;
-import com.conversive.aep.common.NonRetryableError;
 import com.conversive.aep.common.TenantContext;
 import com.conversive.aep.execution.service.ExecutionService;
 import java.util.List;
@@ -47,15 +45,5 @@ public class ExecutionController {
     public ResponseEntity<ApiEnvelope<ExecutionView>> cancel(@PathVariable UUID executionId) {
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(ApiEnvelope.ok(
                 ExecutionView.of(executions.cancel(TenantContext.require(), new ExecutionId(executionId)))));
-    }
-
-    @GetMapping("/preview")
-    @RequiresScope(RequiresScope.EXECUTIONS_READ)
-    public ApiEnvelope<Void> preview(@PathVariable UUID executionId) {
-        throw notImplemented("preview");
-    }
-
-    private static NonRetryableError notImplemented(String what) {
-        return new NonRetryableError(ErrorCodes.NOT_IMPLEMENTED, what + " is not available yet");
     }
 }

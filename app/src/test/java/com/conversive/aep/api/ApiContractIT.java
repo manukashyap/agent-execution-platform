@@ -190,10 +190,19 @@ class ApiContractIT extends PostgresIntegrationTest {
     }
 
     @Test
-    void previewIsNotImplementedYet() throws Exception {
+    void previewIsNotFoundForMissingOrForeignExecutionsAndConflictsForLiveRuns() throws Exception {
         call(get("/v1/executions/" + UUID.randomUUID() + "/preview"), key)
-                .andExpect(status().isNotImplemented())
-                .andExpect(jsonPath("$.error.code").value("NOT_IMPLEMENTED"));
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error.code").value("NOT_FOUND"));
+        publish();
+        String id = executionId(execute("idem-" + UUID.randomUUID()));
+
+        call(get("/v1/executions/" + id + "/preview"), otherKey).andExpect(status().isNotFound());
+        call(get("/v1/executions/" + id + "/preview"), key)
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("CONFLICT"));
+        String noScope = tenants.apiKey(tenant, RequiresScope.WORKFLOWS_WRITE);
+        call(get("/v1/executions/" + id + "/preview"), noScope).andExpect(status().isForbidden());
     }
 
     @Test
