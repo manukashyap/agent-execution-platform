@@ -100,7 +100,7 @@ Constraints that shape every decision:
 ```
 
 - **One Java deployable**, roles toggled by profile (`api`, `worker`, `dispatcher`) so it can scale horizontally per role.
-- **Two logical DBs on one Postgres instance** for the demo: `app` (ours) and `temporal` (Temporal's persistence). Production would separate them.
+- **App DB is always Postgres.** Temporal persistence is profile-dependent: `lite` uses the Temporal dev server (embedded SQLite, zero setup); `full` uses a second logical DB `temporal` on the same Postgres instance. Production separates them (Cassandra/Temporal Cloud at scale). SQLite for the app DB was evaluated and rejected — see [04-local-db-analysis.md](./04-local-db-analysis.md).
 - **Redis** is optional for the prototype (in-memory fallback) but required for a correct multi-instance rate-limit/health story.
 
 ---
@@ -268,6 +268,10 @@ Transaction boundaries: (a) ledger PENDING write, (b) external call (outside any
 | API rate-limited (429) | Retry with `Retry-After` honoured; per-API token bucket before calling | 429 classified as retryable-with-delay, does not consume the failure retry budget beyond a cap; circuit breaker opens on sustained 429/5xx |
 
 Parallel branches (3, 4→5, 6) are independent promises: one branch's failure fails the workflow only if `on_failure=FAIL_WORKFLOW`; otherwise `CONTINUE` marks descendants `SKIPPED`.
+
+### 9.5 Sagas & compensation
+
+On a `FAIL_WORKFLOW` failure or cancellation, completed compensatable nodes are compensated in reverse completion order (= reverse topological) via Temporal `Saga` in a detached cancellation scope; compensations are idempotent through the ledger, reconcile `UNKNOWN` effects first, and pivots (sent messages, LLM spend) escalate instead. Guarantee is **ACD, not ACID** — semantic undo, no isolation. Concurrent-write coordination (status CAS, tenant budget TCC, resource leases + fencing, scratchpad reducers) is in [05-sagas-transactions-and-concurrency.md](./05-sagas-transactions-and-concurrency.md).
 
 ---
 
