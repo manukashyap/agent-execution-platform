@@ -9,7 +9,6 @@ import com.conversive.aep.observability.AepMetrics;
 import com.conversive.aep.sideeffect.persistence.LedgerRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 import org.springframework.context.annotation.Primary;
@@ -46,12 +45,11 @@ public class LedgerSideEffectGuard implements SideEffectGuard {
         }
         for (int race = 0; race < MAX_ROW_RACES; race++) {
             Instant now = clock.instant();
-            Instant lease = spec.leaseUntil(now);
-            if (ledger.insertPending(spec, lease, now)) {
-                return invokeAndCommit(spec, call, lease, true);
+            if (ledger.insertPending(spec, spec.lease(), now)) {
+                return invokeAndCommit(spec, call, true);
             }
             Optional<JsonNode> result = ledger.find(spec.tenantId(), spec.key())
-                    .flatMap(row -> resume(spec, call, row, now, lease));
+                    .flatMap(row -> resume(spec, call, row, now));
             if (result.isPresent()) {
                 return result.get();
             }
@@ -60,7 +58,7 @@ public class LedgerSideEffectGuard implements SideEffectGuard {
     }
 
     /** An existing row; empty means a concurrent attempt changed it first and the caller should re-read. */
-    private Optional<JsonNode> resume(EffectSpec spec, EffectCall call, LedgerEntry row, Instant now, Instant lease) {
+    private Optional<JsonNode> resume(EffectSpec spec, EffectCall call, LedgerEntry row, Instant now) {
         if (row.state() == LedgerState.COMMITTED) {
             return Optional.of(row.response());
         }
@@ -69,17 +67,18 @@ public class LedgerSideEffectGuard implements SideEffectGuard {
                     "effect " + spec.key() + " failed definitively on an earlier attempt");
         }
         // A live lease means in progress whoever owns it: an attempt number cannot tell a re-entry from a duplicate.
-        if (row.state() == LedgerState.PENDING && row.leaseLiveAt(now)) {
-            throw inProgress(spec, row.leaseUntil(), now);
+        // Liveness is judged on the database clock (row.dbNow), never on this node's clock.
+        if (row.state() == LedgerState.PENDING && row.leaseLive()) {
+            throw inProgress(spec, row);
         }
         // PENDING with an expired lease, or UNKNOWN.
         if (row.mode() == IdempotencyMode.NONE) {
             return escalate(spec, row, now);
         }
-        if (!ledger.takeOwnership(row, spec.attempt(), lease, now)) {
+        if (!ledger.takeOwnership(row, spec.attempt(), spec.lease(), now)) {
             return Optional.empty();
         }
-        return Optional.of(reconcile(spec, call, row.mode(), lease));
+        return Optional.of(reconcile(spec, call, row.mode()));
     }
 
     /** NONE: the earlier attempt may or may not have acted and nothing can tell; never call again. */
@@ -94,7 +93,7 @@ public class LedgerSideEffectGuard implements SideEffectGuard {
                 "effect " + spec.key() + " has an unknown outcome and its tool has no idempotency support");
     }
 
-    private JsonNode reconcile(EffectSpec spec, EffectCall call, IdempotencyMode mode, Instant lease) {
+    private JsonNode reconcile(EffectSpec spec, EffectCall call, IdempotencyMode mode) {
         if (mode == IdempotencyMode.LOOKUP) {
             Optional<JsonNode> found = lookup(spec, call);
             if (found.isPresent()) {
@@ -102,7 +101,7 @@ public class LedgerSideEffectGuard implements SideEffectGuard {
             }
         }
         // NATIVE_KEY (or LOOKUP found nothing): re-call with the same key; the provider returns the original result.
-        return invokeAndCommit(spec, call, lease, false);
+        return invokeAndCommit(spec, call, false);
     }
 
     private Optional<JsonNode> lookup(EffectSpec spec, EffectCall call) {
@@ -115,21 +114,21 @@ public class LedgerSideEffectGuard implements SideEffectGuard {
     }
 
     /** {@code createdRow}: this attempt inserted the row, so no earlier call with this key can have landed. */
-    private JsonNode invokeAndCommit(EffectSpec spec, EffectCall call, Instant lease, boolean createdRow) {
+    private JsonNode invokeAndCommit(EffectSpec spec, EffectCall call, boolean createdRow) {
         JsonNode response;
         try {
             response = call.invoke(spec.key().value());
         } catch (RuntimeException e) {
-            throw onCallFailure(spec, lease, createdRow, e);
+            throw onCallFailure(spec, createdRow, e);
         }
         return commit(spec, call, response);
     }
 
-    private RuntimeException onCallFailure(EffectSpec spec, Instant lease, boolean createdRow, RuntimeException error) {
+    private RuntimeException onCallFailure(EffectSpec spec, boolean createdRow, RuntimeException error) {
         Instant now = clock.instant();
         if (providerInFlight(error)) {
             return new RetryableError(ErrorCodes.EFFECT_IN_PROGRESS,
-                    "provider is still processing effect " + spec.key(), remaining(lease, now), error);
+                    "provider is still processing effect " + spec.key(), spec.lease(), error);
         }
         if (error instanceof NonRetryableError nonRetryable && ErrorCodes.RESPONSE_TOO_LARGE.equals(nonRetryable.code())) {
             // The provider answered, so the effect may have landed, but its body is unreadable: FAILED would make
@@ -180,13 +179,8 @@ public class LedgerSideEffectGuard implements SideEffectGuard {
         return false;
     }
 
-    private static RetryableError inProgress(EffectSpec spec, Instant leaseUntil, Instant now) {
+    private static RetryableError inProgress(EffectSpec spec, LedgerEntry row) {
         return new RetryableError(ErrorCodes.EFFECT_IN_PROGRESS,
-                "effect " + spec.key() + " is owned by another attempt until " + leaseUntil, remaining(leaseUntil, now));
-    }
-
-    private static Duration remaining(Instant leaseUntil, Instant now) {
-        Duration left = Duration.between(now, leaseUntil);
-        return left.isNegative() ? Duration.ZERO : left;
+                "effect " + spec.key() + " is owned by another attempt until " + row.leaseUntil(), row.leaseRemaining());
     }
 }

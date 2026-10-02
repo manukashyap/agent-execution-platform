@@ -51,7 +51,7 @@ class ExactlyOnceScenariosIT extends LedgerTestSupport {
         assertThatThrownBy(() -> guard.run(attempt1, crashAfterCall)).isInstanceOf(WorkerCrash.class);
         assertThat(row(attempt1).state()).isEqualTo(LedgerState.PENDING);
 
-        clock.advance(LEASE);
+        advanceLeases(LEASE);
         EffectSpec attempt2 = forward(2, IdempotencyMode.NATIVE_KEY, START_TO_CLOSE);
         JsonNode result = guard.run(attempt2, charge(attempt2));
 
@@ -72,17 +72,18 @@ class ExactlyOnceScenariosIT extends LedgerTestSupport {
                 .isInstanceOfSatisfying(RetryableError.class,
                         e -> assertThat(e.code()).isEqualTo(ErrorCodes.UPSTREAM_TIMEOUT));
 
-        clock.advance(START_TO_CLOSE);
+        advanceLeases(START_TO_CLOSE);
         EffectSpec attempt2 = forward(2, IdempotencyMode.NATIVE_KEY, START_TO_CLOSE);
         assertThatThrownBy(() -> guard.run(attempt2, charge(attempt2)))
                 .isInstanceOfSatisfying(RetryableError.class, e -> {
                     assertThat(e.code()).isEqualTo(ErrorCodes.EFFECT_IN_PROGRESS);
-                    assertThat(e.nextRetryDelay()).isEqualTo(LEASE.minus(START_TO_CLOSE));
+                    assertThat(e.nextRetryDelay()).isBetween(LEASE.minus(START_TO_CLOSE).minusSeconds(2),
+                            LEASE.minus(START_TO_CLOSE));
                 });
         wireMock.verify(exactly(1), postRequestedFor(urlEqualTo("/payments/charge")));
 
         PROVIDER.awaitCompleted(attempt1.key().value(), Duration.ofSeconds(5));
-        clock.set(row(attempt1).leaseUntil());
+        expireLeases();
         EffectSpec attempt3 = forward(3, IdempotencyMode.NATIVE_KEY, START_TO_CLOSE);
         JsonNode result = guard.run(attempt3, charge(attempt3));
 
@@ -103,13 +104,14 @@ class ExactlyOnceScenariosIT extends LedgerTestSupport {
         assertThatThrownBy(() -> guard.run(attempt1, httpPost("/messages/send", attempt1, body)))
                 .isInstanceOf(RetryableError.class);
 
-        clock.advance(START_TO_CLOSE);
+        advanceLeases(START_TO_CLOSE);
         EffectSpec attempt2 = forward(2, IdempotencyMode.NONE, START_TO_CLOSE);
         assertThatThrownBy(() -> guard.run(attempt2, httpPost("/messages/send", attempt2, body)))
                 .isInstanceOfSatisfying(RetryableError.class,
-                        e -> assertThat(e.nextRetryDelay()).isEqualTo(LEASE.minus(START_TO_CLOSE)));
+                        e -> assertThat(e.nextRetryDelay()).isBetween(LEASE.minus(START_TO_CLOSE).minusSeconds(2),
+                                LEASE.minus(START_TO_CLOSE)));
 
-        clock.set(row(attempt1).leaseUntil());
+        expireLeases();
         for (int attempt = 3; attempt <= 4; attempt++) {
             EffectSpec next = forward(attempt, IdempotencyMode.NONE, START_TO_CLOSE);
             assertThatThrownBy(() -> guard.run(next, httpPost("/messages/send", next, body)))

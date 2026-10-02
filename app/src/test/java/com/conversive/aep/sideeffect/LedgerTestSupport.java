@@ -25,6 +25,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import com.conversive.aep.observability.AepMetrics;
 import com.conversive.aep.tenancy.TenantTier;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -42,6 +43,9 @@ abstract class LedgerTestSupport extends PostgresIntegrationTest {
 
     @Autowired
     ObjectMapper mapper;
+
+    @Autowired
+    JdbcClient jdbc;
 
     MutableClock clock;
     SimpleMeterRegistry meters;
@@ -90,6 +94,22 @@ abstract class LedgerTestSupport extends PostgresIntegrationTest {
     EffectCall charge(EffectSpec spec) {
         return httpPost("/payments/charge", spec,
                 mapper.createObjectNode().put("customer_id", "c_1").put("amount_cents", 1000).put("currency", "USD"));
+    }
+
+    /** Leases live on the database clock, so time passes by moving this execution's leases into the past. */
+    void advanceLeases(Duration by) {
+        jdbc.sql("UPDATE side_effect_ledger SET lease_until = lease_until - CAST(:ms AS double precision) * interval '1 millisecond'"
+                        + " WHERE execution_id = :exec")
+                .param("ms", by.toMillis())
+                .param("exec", execution.value())
+                .update();
+    }
+
+    /** Ends every lease of this execution right now, as if each had just run out. */
+    void expireLeases() {
+        jdbc.sql("UPDATE side_effect_ledger SET lease_until = now() WHERE execution_id = :exec")
+                .param("exec", execution.value())
+                .update();
     }
 
     LedgerEntry row(EffectSpec spec) {

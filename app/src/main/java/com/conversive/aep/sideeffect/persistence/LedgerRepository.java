@@ -13,6 +13,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -31,8 +32,11 @@ public class LedgerRepository {
 
     private static final String COLUMNS = """
             effect_key, tenant_id, execution_id, node_id, phase, call_index, state, idempotency_mode,
-            owner_attempt, lease_until, external_ref, response::text AS response
+            owner_attempt, lease_until, now() AS db_now, external_ref, response::text AS response
             """;
+
+    /** Leases are written as {@code now() + interval} so every node measures them on the database clock. */
+    private static final String LEASE_FROM_NOW = "now() + (CAST(:leaseMillis AS double precision) * interval '1 millisecond')";
 
     private static final String COMMIT = """
             UPDATE side_effect_ledger
@@ -49,14 +53,14 @@ public class LedgerRepository {
     }
 
     /** {@code INSERT … ON CONFLICT DO NOTHING}; true when this caller created the PENDING row. */
-    public boolean insertPending(EffectSpec spec, Instant leaseUntil, Instant now) {
+    public boolean insertPending(EffectSpec spec, Duration lease, Instant now) {
         return jdbc.sql("""
                         INSERT INTO side_effect_ledger (effect_key, tenant_id, execution_id, node_id, phase, call_index,
                             state, idempotency_mode, owner_attempt, lease_until, created_at, updated_at)
                         VALUES (:key, :tenant, :exec, :node, :phase, :callIndex,
-                            'PENDING', :mode, :attempt, :lease, :now, :now)
+                            'PENDING', :mode, :attempt, %s, :now, :now)
                         ON CONFLICT DO NOTHING
-                        """)
+                        """.formatted(LEASE_FROM_NOW))
                 .param("key", spec.key().value())
                 .param("tenant", spec.tenantId().value())
                 .param("exec", spec.executionId().value())
@@ -65,7 +69,7 @@ public class LedgerRepository {
                 .param("callIndex", spec.callIndex())
                 .param("mode", spec.mode().name())
                 .param("attempt", spec.attempt())
-                .param("lease", ts(leaseUntil))
+                .param("leaseMillis", lease.toMillis())
                 .param("now", ts(now))
                 .update() == 1;
     }
@@ -79,15 +83,16 @@ public class LedgerRepository {
     }
 
     /** CAS on the row as last read: moves PENDING(expired)/UNKNOWN to PENDING owned by {@code attempt}. */
-    public boolean takeOwnership(LedgerEntry expected, int attempt, Instant leaseUntil, Instant now) {
+    public boolean takeOwnership(LedgerEntry expected, int attempt, Duration lease, Instant now) {
         return jdbc.sql("""
                         UPDATE side_effect_ledger
-                        SET state = 'PENDING', owner_attempt = :attempt, lease_until = :lease, updated_at = :now
+                        SET state = 'PENDING', owner_attempt = :attempt, lease_until = %s,
+                            updated_at = :now
                         WHERE tenant_id = :tenant AND effect_key = :key AND state = :state
                           AND owner_attempt = :owner AND lease_until = :expectedLease
-                        """)
+                        """.formatted(LEASE_FROM_NOW))
                 .param("attempt", attempt)
-                .param("lease", ts(leaseUntil))
+                .param("leaseMillis", lease.toMillis())
                 .param("now", ts(now))
                 .param("state", expected.state().name())
                 .param("owner", expected.ownerAttempt())
@@ -167,7 +172,7 @@ public class LedgerRepository {
     /** The owner's call has ended without an answer about the effect: let the next attempt reconcile at once. */
     public boolean expireLease(TenantId tenantId, EffectKey key, int owner, Instant now) {
         return jdbc.sql("""
-                        UPDATE side_effect_ledger SET lease_until = :now, updated_at = :now
+                        UPDATE side_effect_ledger SET lease_until = now(), updated_at = :now
                         WHERE tenant_id = :tenant AND effect_key = :key AND state = 'PENDING' AND owner_attempt = :owner
                         """)
                 .param("now", ts(now))
@@ -201,6 +206,7 @@ public class LedgerRepository {
                 IdempotencyMode.valueOf(rs.getString("idempotency_mode")),
                 rs.getInt("owner_attempt"),
                 rs.getObject("lease_until", OffsetDateTime.class).toInstant(),
+                rs.getObject("db_now", OffsetDateTime.class).toInstant(),
                 rs.getString("external_ref"),
                 read(rs.getString("response")));
     }

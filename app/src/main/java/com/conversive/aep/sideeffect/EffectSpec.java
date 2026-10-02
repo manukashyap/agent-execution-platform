@@ -6,7 +6,6 @@ import com.conversive.aep.common.IdempotencyMode;
 import com.conversive.aep.common.Phase;
 import com.conversive.aep.common.TenantId;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.Objects;
 
 /**
@@ -49,7 +48,8 @@ public record EffectSpec(
         return TimingContract.httpTimeout(startToClose);
     }
 
-    public Instant leaseUntil(Instant now) {
-        return TimingContract.leaseUntil(now, startToClose);
+    /** How long one attempt owns the row; the ledger adds it to the database clock, never to a node's clock. */
+    public Duration lease() {
+        return TimingContract.lease(startToClose);
     }
 }

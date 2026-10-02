@@ -18,6 +18,8 @@ import com.conversive.aep.common.ExecutionMode;
 import com.conversive.aep.common.http.OutboundClient;
 import com.conversive.aep.common.http.OutboundProperties;
 import com.conversive.aep.common.http.OutboundRequest;
+import com.conversive.aep.observability.AepMetrics;
+import com.conversive.aep.tenancy.TenantTier;
 import java.net.URI;
 import java.time.Clock;
 import java.time.Duration;
@@ -55,7 +57,7 @@ class LedgerSideEffectGuardIT extends LedgerTestSupport {
         assertThat(result.get("charge_id").asText()).isEqualTo("ch_1");
         assertThat(row(spec)).returns(LedgerState.COMMITTED, LedgerEntry::state)
                 .returns("ch_1", LedgerEntry::externalRef)
-                .returns(T0.plusSeconds(15), LedgerEntry::leaseUntil);
+                .satisfies(r -> assertThat(r.leaseRemaining()).isBetween(Duration.ofSeconds(13), Duration.ofSeconds(15)));
     }
 
     @Test
@@ -93,18 +95,18 @@ class LedgerSideEffectGuardIT extends LedgerTestSupport {
                 .withHeader("Content-Type", "application/json").withBody("{\"error\":\"in_progress\"}")));
         EffectSpec spec = forward(1, IdempotencyMode.NATIVE_KEY, START_TO_CLOSE);
         EffectCall slowClock = key -> {
-            clock.advance(Duration.ofSeconds(4));
+            advanceLeases(Duration.ofSeconds(4));
             return charge(spec).invoke(key);
         };
 
         assertThatThrownBy(() -> guard.run(spec, slowClock))
                 .isInstanceOfSatisfying(RetryableError.class, e -> {
                     assertThat(e.code()).isEqualTo(ErrorCodes.EFFECT_IN_PROGRESS);
-                    assertThat(e.nextRetryDelay()).isEqualTo(Duration.ofSeconds(11));
+                    assertThat(e.nextRetryDelay()).isEqualTo(Duration.ofSeconds(15));
                 });
         assertThat(row(spec)).returns(LedgerState.PENDING, LedgerEntry::state)
                 .returns(1, LedgerEntry::ownerAttempt)
-                .returns(T0.plusSeconds(15), LedgerEntry::leaseUntil);
+                .satisfies(r -> assertThat(r.leaseRemaining()).isBetween(Duration.ofSeconds(9), Duration.ofSeconds(11)));
     }
 
     @Test
@@ -125,7 +127,7 @@ class LedgerSideEffectGuardIT extends LedgerTestSupport {
 
         assertThatThrownBy(() -> guard.run(spec, charge(spec))).isInstanceOfSatisfying(RetryableError.class,
                 e -> assertThat(e.code()).isEqualTo(ErrorCodes.UPSTREAM_UNAVAILABLE));
-        assertThat(row(spec)).returns(LedgerState.PENDING, LedgerEntry::state).returns(T0, LedgerEntry::leaseUntil);
+        assertThat(row(spec)).returns(LedgerState.PENDING, LedgerEntry::state).returns(false, LedgerEntry::leaseLive);
 
         stubCharge();
         EffectSpec retry = forward(2, IdempotencyMode.NATIVE_KEY, START_TO_CLOSE);
@@ -151,7 +153,7 @@ class LedgerSideEffectGuardIT extends LedgerTestSupport {
         assertThatThrownBy(() -> guard.run(attempt1, key -> {
             throw new RetryableError(ErrorCodes.UPSTREAM_TIMEOUT, "timeout");
         })).isInstanceOf(RetryableError.class);
-        clock.advance(Duration.ofSeconds(15));
+        advanceLeases(Duration.ofSeconds(15));
         wireMock.stubFor(post("/payments/charge").willReturn(aResponse().withStatus(429).withHeader("Retry-After", "1")));
         EffectSpec attempt2 = forward(2, IdempotencyMode.NATIVE_KEY, START_TO_CLOSE);
 
@@ -161,7 +163,7 @@ class LedgerSideEffectGuardIT extends LedgerTestSupport {
 
         assertThat(row(attempt1)).returns(LedgerState.PENDING, LedgerEntry::state)
                 .returns(2, LedgerEntry::ownerAttempt)
-                .returns(clock.instant(), LedgerEntry::leaseUntil);
+                .returns(false, LedgerEntry::leaseLive);
     }
 
     @Test
@@ -184,7 +186,7 @@ class LedgerSideEffectGuardIT extends LedgerTestSupport {
 
         // Attempt 1's call outlives its lease; attempt 2 takes the row over and its own call is still unresolved.
         assertThatThrownBy(() -> guard.run(zombie, key -> {
-            clock.advance(Duration.ofSeconds(15));
+            advanceLeases(Duration.ofSeconds(15));
             assertThatThrownBy(() -> guard.run(taker, k -> {
                 throw new RetryableError(ErrorCodes.UPSTREAM_TIMEOUT, "timeout");
             })).isInstanceOf(RetryableError.class);
@@ -214,13 +216,37 @@ class LedgerSideEffectGuardIT extends LedgerTestSupport {
     }
 
     @Test
+    void anApplicationClockThirtySecondsAheadCannotTakeOverALiveLease() {
+        AepMetrics aepMetrics = new AepMetrics(meters, tenant -> TenantTier.STANDARD);
+        LedgerSideEffectGuard onTime = new LedgerSideEffectGuard(ledger, Clock.systemUTC(), aepMetrics);
+        LedgerSideEffectGuard skewed = new LedgerSideEffectGuard(ledger,
+                Clock.offset(Clock.systemUTC(), Duration.ofSeconds(30)), aepMetrics);
+        EffectSpec owner = forward(1, IdempotencyMode.NATIVE_KEY, START_TO_CLOSE);
+        EffectSpec other = forward(2, IdempotencyMode.NATIVE_KEY, START_TO_CLOSE);
+        assertThatThrownBy(() -> onTime.run(owner, key -> {
+            throw new RetryableError(ErrorCodes.UPSTREAM_TIMEOUT, "timeout");
+        })).isInstanceOf(RetryableError.class);
+        AtomicInteger calls = new AtomicInteger();
+
+        // The lease runs 15 s on the database clock; a node whose own clock reads +30 s must still see it as live.
+        assertThatThrownBy(() -> skewed.run(other, key -> {
+            calls.incrementAndGet();
+            return mapper.createObjectNode();
+        })).isInstanceOfSatisfying(RetryableError.class,
+                e -> assertThat(e.code()).isEqualTo(ErrorCodes.EFFECT_IN_PROGRESS));
+
+        assertThat(calls).hasValue(0);
+        assertThat(row(owner).ownerAttempt()).isEqualTo(1);
+    }
+
+    @Test
     void lookupModeCommitsAnEffectFoundByLookupWithoutCallingAgain() {
         EffectSpec attempt1 = spec("crm", Phase.FORWARD, 1, IdempotencyMode.LOOKUP,
                 START_TO_CLOSE);
         assertThatThrownBy(() -> guard.run(attempt1, key -> {
             throw new RetryableError(ErrorCodes.UPSTREAM_TIMEOUT, "timeout");
         })).isInstanceOf(RetryableError.class);
-        clock.advance(Duration.ofSeconds(15));
+        advanceLeases(Duration.ofSeconds(15));
         JsonNode found = mapper.createObjectNode().put("external_ref", "lead_7");
         AtomicInteger calls = new AtomicInteger();
 
@@ -250,7 +276,7 @@ class LedgerSideEffectGuardIT extends LedgerTestSupport {
         assertThatThrownBy(() -> guard.run(attempt1, key -> {
             throw new RetryableError(ErrorCodes.UPSTREAM_TIMEOUT, "timeout");
         })).isInstanceOf(RetryableError.class);
-        clock.advance(Duration.ofSeconds(15));
+        advanceLeases(Duration.ofSeconds(15));
         JsonNode created = mapper.createObjectNode().put("external_ref", "lead_8");
 
         JsonNode result = guard.run(attempt1Retry(), key -> created);
