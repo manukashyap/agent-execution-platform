@@ -314,7 +314,7 @@ Each cut = one README line + its design-doc section, committed as `docs: cut <it
 | P2a ★ | D1·3 | 4.00 | ☐ | ☐ | |
 | P2b | D1·4 | 0.75 | ☐ | ☐ Checkpoint A | |
 | Doc skeleton ★ | D1·5 | 0.50 | ✅ | ✅ | `docs/design.md` drafted (≈3.6 k words, trim ~600 in P10) |
-| P5 ★ | D2·1 | 1.50 | ☐ | ☐ | |
+| P5 ★ | D2·1 | 1.50 | 🟡 | ☐ | T5.1/T5.2/T5.4 guard-level + mocks T5.3 done (ledger ITs green); engine-level §9 tests + walkthrough wait on P2a |
 | P3 ★ | D2·2 | 1.50 | ☐ | ☐ | |
 | P4 | D2·3 | 1.25 | ☐ | ☐ | |
 | P6 ★ | D2·4 | 0.75 | ☐ | ☐ Checkpoint B | |
