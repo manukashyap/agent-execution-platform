@@ -27,7 +27,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,prometheus,flyway
+        include: health,info,prometheus
   endpoint:
     health:
       probes:

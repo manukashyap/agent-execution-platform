@@ -68,8 +68,40 @@ public final class EgressPolicy {
         }
         byte[] b = a.getAddress();
         if (a instanceof Inet6Address) {
-            return (b[0] & 0xFE) == 0xFC;
+            if ((b[0] & 0xFE) == 0xFC) {
+                return true;
+            }
+            byte[] embedded = embeddedIpv4(b);
+            return embedded != null && isInternal(ipv4(embedded));
         }
+        return isInternalIpv4(b);
+    }
+
+    /** The IPv4 carried by a NAT64 (64:ff9b::/96) or 6to4 (2002::/16) address, else null. */
+    private static byte[] embeddedIpv4(byte[] b) {
+        if (b[0] == 0x00 && b[1] == 0x64 && (b[2] & 0xFF) == 0xFF && (b[3] & 0xFF) == 0x9B) {
+            for (int i = 4; i < 12; i++) {
+                if (b[i] != 0) {
+                    return null;
+                }
+            }
+            return java.util.Arrays.copyOfRange(b, 12, 16);
+        }
+        if (b[0] == 0x20 && b[1] == 0x02) {
+            return java.util.Arrays.copyOfRange(b, 2, 6);
+        }
+        return null;
+    }
+
+    private static InetAddress ipv4(byte[] four) {
+        try {
+            return InetAddress.getByAddress(four);
+        } catch (UnknownHostException e) {
+            throw new IllegalStateException("4 bytes is always a valid IPv4 address", e);
+        }
+    }
+
+    private static boolean isInternalIpv4(byte[] b) {
         int first = b[0] & 0xFF;
         int second = b[1] & 0xFF;
         boolean carrierGradeNat = first == 100 && second >= 64 && second <= 127;
