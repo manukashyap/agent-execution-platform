@@ -20,7 +20,7 @@ api() {
 }
 
 field() {
-  sed -n "s/.*\"$1\":\"\([^\"]*\)\".*/\1/p" | head -n 1
+  grep -o "\"$1\":\"[^\"]*\"" | head -n 1 | cut -d'"' -f4
 }
 
 # Hit count for one mocks route from GET /admin/calls (0 when the route was never hit).
