@@ -7,10 +7,13 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PreDestroy;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InterruptedIOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
@@ -37,11 +40,11 @@ import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuil
 import org.apache.hc.client5.http.protocol.HttpClientContext;
 import org.apache.hc.core5.http.ClassicHttpResponse;
 import org.apache.hc.core5.http.ConnectionRequestTimeoutException;
+import org.apache.hc.core5.http.ContentTooLongException;
 import org.apache.hc.core5.http.ContentType;
 import org.apache.hc.core5.http.Header;
-import org.apache.hc.core5.http.ParseException;
+import org.apache.hc.core5.http.HttpEntity;
 import org.apache.hc.core5.http.io.entity.ByteArrayEntity;
-import org.apache.hc.core5.http.io.entity.EntityUtils;
 import org.apache.hc.core5.util.Timeout;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -62,6 +65,7 @@ public class OutboundClient {
     private final ObjectMapper mapper;
     private final Clock clock;
     private final Duration connectionRequestTimeout;
+    private final int maxResponseBytes;
     /** Fires {@code HttpUriRequestBase.cancel()} at each call's deadline; one daemon thread, tasks are tiny. */
     private final ScheduledThreadPoolExecutor deadlines = newDeadlineScheduler();
     /** Whether the request sent on this thread targets an allow-listed host; the client connects on the caller's thread. */
@@ -89,6 +93,7 @@ public class OutboundClient {
         this.mapper = mapper;
         this.clock = clock;
         this.connectionRequestTimeout = properties.connectionRequestTimeout();
+        this.maxResponseBytes = properties.maxResponseBytes();
     }
 
     private static ScheduledThreadPoolExecutor newDeadlineScheduler() {
@@ -156,7 +161,10 @@ public class OutboundClient {
         }, request.timeout().toNanos(), TimeUnit.NANOSECONDS);
         allowListed.set(exempt);
         try {
-            return this.http.execute(http, context, OutboundClient::readResponse);
+            return this.http.execute(http, context, response -> readResponse(http, response));
+        } catch (ContentTooLongException e) {
+            throw new NonRetryableError(ErrorCodes.RESPONSE_TOO_LARGE,
+                    "response from " + host + " exceeds " + maxResponseBytes + " bytes", e);
         } catch (ConnectionRequestTimeoutException e) {
             throw new RetryableError(ErrorCodes.UPSTREAM_NOT_SENT, "no free connection to " + host, null, e);
         } catch (IOException e) {
@@ -174,16 +182,46 @@ public class OutboundClient {
         return a.compareTo(b) <= 0 ? a : b;
     }
 
-    private static RawResponse readResponse(ClassicHttpResponse response) throws IOException {
+    /** Reads at most {@code maxResponseBytes}; an oversize body aborts the connection instead of draining it. */
+    private RawResponse readResponse(HttpUriRequestBase request, ClassicHttpResponse response) throws IOException {
         Map<String, List<String>> headers = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
         for (Header header : response.getHeaders()) {
             headers.computeIfAbsent(header.getName(), k -> new ArrayList<>()).add(header.getValue());
         }
+        HttpEntity entity = response.getEntity();
+        if (entity == null) {
+            return new RawResponse(response.getCode(), headers, null);
+        }
         try {
-            String body = response.getEntity() == null ? null : EntityUtils.toString(response.getEntity());
-            return new RawResponse(response.getCode(), headers, body);
-        } catch (ParseException e) {
-            throw new IOException("unreadable response body", e);
+            byte[] bytes = readBounded(entity);
+            ContentType type = ContentType.parseLenient(entity.getContentType());
+            Charset charset = type == null ? StandardCharsets.ISO_8859_1 : type.getCharset(StandardCharsets.ISO_8859_1);
+            return new RawResponse(response.getCode(), headers, new String(bytes, charset));
+        } catch (ContentTooLongException e) {
+            request.cancel();
+            throw e;
+        }
+    }
+
+    /** Streams the body into memory, failing the moment it passes the cap (announced length or not). */
+    private byte[] readBounded(HttpEntity entity) throws IOException {
+        if (entity.getContentLength() > maxResponseBytes) {
+            throw new ContentTooLongException("Content length " + entity.getContentLength() + " exceeds " + maxResponseBytes);
+        }
+        try (InputStream in = entity.getContent()) {
+            if (in == null) {
+                return new byte[0];
+            }
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = in.read(buffer)) != -1) {
+                if (out.size() + read > maxResponseBytes) {
+                    throw new ContentTooLongException("Content exceeds " + maxResponseBytes + " bytes");
+                }
+                out.write(buffer, 0, read);
+            }
+            return out.toByteArray();
         }
     }
 

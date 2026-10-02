@@ -14,7 +14,15 @@ import com.conversive.aep.common.NonRetryableError;
 import com.conversive.aep.common.Phase;
 import com.conversive.aep.common.RetryableError;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.conversive.aep.common.ExecutionMode;
+import com.conversive.aep.common.http.OutboundClient;
+import com.conversive.aep.common.http.OutboundProperties;
+import com.conversive.aep.common.http.OutboundRequest;
+import java.net.URI;
+import java.time.Clock;
 import java.time.Duration;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
@@ -186,6 +194,23 @@ class LedgerSideEffectGuardIT extends LedgerTestSupport {
         assertThat(row(zombie)).returns(LedgerState.PENDING, LedgerEntry::state)
                 .returns(2, LedgerEntry::ownerAttempt)
                 .returns(null, LedgerEntry::response);
+    }
+
+    @Test
+    void responseTooLargeLeavesTheRowUnknownBecauseTheEffectMayHaveLandedUnseen() {
+        OutboundClient capped = new OutboundClient(new OutboundProperties(List.of("localhost:" + wireMock.port()),
+                List.of(), Duration.ofSeconds(1)).withMaxResponseBytes(100), mapper, Clock.systemUTC());
+        wireMock.stubFor(post("/payments/charge").willReturn(aResponse().withStatus(200)
+                .withHeader("Content-Type", "application/json").withBody("{\"pad\":\"" + "x".repeat(500) + "\"}")));
+        EffectSpec spec = forward(1, IdempotencyMode.NATIVE_KEY, START_TO_CLOSE);
+        EffectCall call = key -> capped.send(new OutboundRequest("POST", URI.create(wireMock.baseUrl() + "/payments/charge"),
+                Map.of(), mapper.createObjectNode(), spec.httpTimeout(), key, ExecutionMode.LIVE, false)).body();
+
+        assertThatThrownBy(() -> guard.run(spec, call)).isInstanceOfSatisfying(NonRetryableError.class,
+                e -> assertThat(e.code()).isEqualTo(ErrorCodes.RESPONSE_TOO_LARGE));
+
+        // FAILED would make compensation skip a charge that may well exist; UNKNOWN keeps it reconcilable.
+        assertThat(row(spec).state()).isEqualTo(LedgerState.UNKNOWN);
     }
 
     @Test

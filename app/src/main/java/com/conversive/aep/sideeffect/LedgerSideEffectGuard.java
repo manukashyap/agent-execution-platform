@@ -131,7 +131,13 @@ public class LedgerSideEffectGuard implements SideEffectGuard {
             return new RetryableError(ErrorCodes.EFFECT_IN_PROGRESS,
                     "provider is still processing effect " + spec.key(), remaining(lease, now), error);
         }
-        if (error instanceof NonRetryableError) {
+        if (error instanceof NonRetryableError nonRetryable && ErrorCodes.RESPONSE_TOO_LARGE.equals(nonRetryable.code())) {
+            // The provider answered, so the effect may have landed, but its body is unreadable: FAILED would make
+            // compensation skip it, so park the row as UNKNOWN where reconciliation or a human can resolve it.
+            if (ledger.markUnknownByOwner(spec.tenantId(), spec.key(), spec.attempt(), now)) {
+                metrics.sideEffectUnknown();
+            }
+        } else if (error instanceof NonRetryableError) {
             ledger.markFailed(spec.tenantId(), spec.key(), spec.attempt(), now);
         } else if (error instanceof RetryableError retryable) {
             boolean notSent = ErrorCodes.UPSTREAM_RATE_LIMITED.equals(retryable.code())

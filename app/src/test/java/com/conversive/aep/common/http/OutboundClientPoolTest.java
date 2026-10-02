@@ -65,7 +65,7 @@ class OutboundClientPoolTest {
     void exhaustedPoolFailsAsNotSentBeforeAnythingIsTransmitted() throws Exception {
         wireMock.stubFor(get("/slow").willReturn(okJson("{}").withFixedDelay(1500)));
         OutboundClient client = client(new OutboundProperties(List.of("localhost:" + wireMock.port()), List.of(),
-                Duration.ofSeconds(1), 10, 1, Duration.ofMillis(200)));
+                Duration.ofSeconds(1), 10, 1, Duration.ofMillis(200), null));
         ExecutorService pool = Executors.newSingleThreadExecutor();
         try {
             CompletableFuture<?> occupying = CompletableFuture.runAsync(() -> client.send(request()), pool);

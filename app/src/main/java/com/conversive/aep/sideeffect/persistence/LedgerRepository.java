@@ -151,6 +151,19 @@ public class LedgerRepository {
                 .update() == 1;
     }
 
+    /** The owner's call got an answer it could not use: PENDING → UNKNOWN so the effect stays reconcilable. */
+    public boolean markUnknownByOwner(TenantId tenantId, EffectKey key, int owner, Instant now) {
+        return jdbc.sql("""
+                        UPDATE side_effect_ledger SET state = 'UNKNOWN', updated_at = :now
+                        WHERE tenant_id = :tenant AND effect_key = :key AND state = 'PENDING' AND owner_attempt = :owner
+                        """)
+                .param("now", ts(now))
+                .param("tenant", tenantId.value())
+                .param("key", key.value())
+                .param("owner", owner)
+                .update() == 1;
+    }
+
     /** The owner's call has ended without an answer about the effect: let the next attempt reconcile at once. */
     public boolean expireLease(TenantId tenantId, EffectKey key, int owner, Instant now) {
         return jdbc.sql("""
