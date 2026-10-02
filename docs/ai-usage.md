@@ -213,3 +213,9 @@ P8 (observability, T8.1/T8.2) deviations and assumptions:
 ### P6 T6.3 notes
 
 - `scripts/dry-run.sh` accepts `BASE_URL`/`MOCKS_URL` (falling back to `AEP_BASE_URL`/`AEP_MOCKS_URL`). When several app instances share one Temporal, give each its own `AEP_TEMPORAL_TASK_QUEUE`; with the default `aep-main` another instance's worker can steal the activities and run them with its own egress allow-list and older code.
+
+### P10 T10.2 / T10.4 (replay half) notes
+
+- **Architecture diagram:** `docs/architecture.svg` is hand-written SVG (no fonts or scripts), referenced from design.md section 1. The Mermaid block stays as a text fallback. The Temporal server box and the fairness key are drawn from `TemporalPriorityPolicy`; the diagram is a logical view, not a deployment view.
+- **Replay tests:** `WorkflowReplayIT` replays two committed histories (`app/src/test/resources/histories/`: happy path with condition + forEach, and a saga that compensates) with `WorkflowReplayer` against `DagInterpreterWorkflowImpl`. It needs no Postgres or Temporal server.
+- **Re-recording:** `AEP_RECORD_HISTORIES=true ./gradlew :app:test --tests '*Record*HistoryIT'` (an environment variable, because Gradle does not forward `-D` flags to the test JVM). The recorders are skipped otherwise. Re-record only after a deliberate, reviewed workflow change; a replay failure on an unchanged recording means in-flight runs would break, so gate with `Workflow.getVersion` instead.
