@@ -180,6 +180,16 @@ class ApiContractIT extends PostgresIntegrationTest {
     }
 
     @Test
+    void toolCatalogIsServedBehindApiKeyAuthAndScopes() throws Exception {
+        call(get("/v1/tools"), key)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.meta.count").value(0));
+        mvc.perform(get("/v1/tools")).andExpect(status().isUnauthorized());
+        String executionsOnly = tenants.apiKey(tenant, RequiresScope.EXECUTIONS_READ);
+        call(get("/v1/tools"), executionsOnly).andExpect(status().isForbidden());
+    }
+
+    @Test
     void previewAndTraceAreNotImplementedYet() throws Exception {
         call(get("/v1/executions/" + UUID.randomUUID() + "/preview"), key)
                 .andExpect(status().isNotImplemented())

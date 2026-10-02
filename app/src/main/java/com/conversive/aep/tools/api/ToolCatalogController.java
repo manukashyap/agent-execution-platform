@@ -1,5 +1,6 @@
 package com.conversive.aep.tools.api;
 
+import com.conversive.aep.api.auth.RequiresScope;
 import com.conversive.aep.common.ErrorCodes;
 import com.conversive.aep.common.TenantContext;
 import com.conversive.aep.common.TenantId;
@@ -44,6 +45,7 @@ public class ToolCatalogController {
     }
 
     @GetMapping("/v1/tools")
+    @RequiresScope(RequiresScope.WORKFLOWS_READ)
     public ResponseEntity<Envelope<List<ToolView>>> list() {
         Optional<TenantId> tenant = TenantContext.current();
         if (tenant.isEmpty()) {
