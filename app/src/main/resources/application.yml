@@ -74,8 +74,9 @@ aep:
     limits-refresh: 30s
     concurrency-retry-after: 5s
     dev:
-      dev-api-key: ${AEP_DEV_API_KEY:}
-      other-api-key: ${AEP_DEV_OTHER_API_KEY:}
+      # seeded only under the dev profile (DevApiKeySeeder); same documented defaults as compose.yml
+      dev-api-key: ${AEP_DEV_API_KEY:aep-dev-key-t_dev}
+      other-api-key: ${AEP_DEV_OTHER_API_KEY:aep-dev-key-t_other}
   observability:
     queue-depth:
       enabled: true

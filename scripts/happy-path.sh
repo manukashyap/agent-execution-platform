@@ -9,7 +9,7 @@ BASE="${AEP_BASE_URL:-http://localhost:8000}"
 MOCKS="${AEP_MOCKS_URL:-http://localhost:8090}"
 # URL the app resolves for workflow nodes: inside the compose app container the mocks are http://mocks:8090, not localhost.
 WF_MOCKS="${AEP_WF_MOCKS_URL:-$(if docker ps --format "{{.Names}}" 2>/dev/null | grep -qx aep-app-1; then echo http://mocks:8090; else echo "$MOCKS"; fi)}"
-KEY="${AEP_DEV_API_KEY:?set AEP_DEV_API_KEY to the key the app was started with}"
+KEY="${AEP_DEV_API_KEY:-aep-dev-key-t_dev}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SPEC="$ROOT/app/src/test/resources/fixtures/pdf-example.json"
 RUN="$(date +%s)"

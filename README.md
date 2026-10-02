@@ -43,7 +43,7 @@ Full stack with Prometheus and Temporal UI: `docker compose --profile full --pro
 
 ```bash
 export JAVA_HOME=<a JDK 21>
-export AEP_DEV_API_KEY=my-local-key        # required for the demo scripts, see below
+# optional: defaults to aep-dev-key-t_dev (tenant t_dev), as in compose
 ./gradlew :app:bootRun
 ```
 
@@ -54,7 +54,7 @@ export AEP_DEV_API_KEY=my-local-key        # required for the demo scripts, see 
 
 ### How to get an API key
 
-There is no key-issuing endpoint. Keys are stored only as SHA-256 hashes in `api_key`. Under the `dev` profile, `DevApiKeySeeder` runs at startup and hashes the plaintext from `AEP_DEV_API_KEY` (tenant `t_dev`) and `AEP_DEV_OTHER_API_KEY` (tenant `t_other`, for isolation checks), inserting them with scope `*`. So **you choose the key**: set `AEP_DEV_API_KEY` before starting the app and send it back as a bearer token. `bootRun` has no default; if the variable is empty the seeder logs a warning and skips it. Only the compose file supplies defaults (above). Outside the `dev` profile no key is seeded.
+There is no key-issuing endpoint. Keys are stored only as SHA-256 hashes in `api_key`. Under the `dev` profile, `DevApiKeySeeder` runs at startup and hashes the plaintext from `AEP_DEV_API_KEY` (tenant `t_dev`) and `AEP_DEV_OTHER_API_KEY` (tenant `t_other`, for isolation checks), inserting them with scope `*`. Both `bootRun` and compose default to `aep-dev-key-t_dev` / `aep-dev-key-t_other`; set `AEP_DEV_API_KEY` / `AEP_DEV_OTHER_API_KEY` to choose your own, and send the key back as a bearer token. Outside the `dev` profile no key is seeded, so these defaults never reach a non-dev deployment.
 
 ```bash
 curl -H "Authorization: Bearer $AEP_DEV_API_KEY" http://localhost:8000/v1/tools   # or: -H "X-API-Key: ..."
@@ -95,7 +95,7 @@ Node types: `http`, `llm`, `mcp`, `condition`; parallelism comes from the DAG (`
 
 ## Demo scripts (`scripts/`)
 
-Each prints its own checks. All need `AEP_DEV_API_KEY` set to the key the app was started with, and honour `AEP_BASE_URL` / `BASE_URL` (default `http://localhost:8000`) and `AEP_MOCKS_URL` / `MOCKS_URL` (default `http://localhost:8090`). Workflow nodes are resolved by the app, so against the compose `app` container the scripts publish `http://mocks:8090` URLs automatically (override with `AEP_WF_MOCKS_URL`). Run the stack first (compose `lite` plus the app, or the dev path).
+Each prints its own checks. They use `AEP_DEV_API_KEY` (default `aep-dev-key-t_dev`, matching the app's dev default), and honour `AEP_BASE_URL` / `BASE_URL` (default `http://localhost:8000`) and `AEP_MOCKS_URL` / `MOCKS_URL` (default `http://localhost:8090`). Workflow nodes are resolved by the app, so against the compose `app` container the scripts publish `http://mocks:8090` URLs automatically (override with `AEP_WF_MOCKS_URL`). Run the stack first (compose `lite` plus the app, or the dev path).
 
 | Script | What it proves |
 |---|---|
