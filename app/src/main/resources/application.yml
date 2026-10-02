@@ -63,6 +63,9 @@ aep:
       run-timeout-slack: 1h
   api:
     start-failed-retry-after-s: 5
+  tools:
+    mcp-url: ${AEP_MOCKS_BASE_URL:http://localhost:8090}/mcp
+    dev-credential: ${AEP_TOOL_DEV_CREDENTIAL:}
   tenancy:
     dev:
       dev-api-key: ${AEP_DEV_API_KEY:}

@@ -23,7 +23,7 @@ class McpIT extends MockIT {
     }
 
     @Test
-    void toolsListReturnsSixToolsWithSchemas() throws Exception {
+    void toolsListReturnsSevenToolsWithSchemas() throws Exception {
         JsonNode tools = rpc("tools/list", null, Map.of()).body().get("result").get("tools");
 
         List<String> names = new ArrayList<>();
@@ -33,7 +33,7 @@ class McpIT extends MockIT {
             assertThat(t.get("inputSchema").get("type").asText()).isEqualTo("object");
         });
         assertThat(names).containsExactlyInAnyOrder("payments.charge", "payments.refund", "messaging.send",
-                "crm.upsert", "crm.get", "leads.fetch");
+                "crm.upsert", "crm.get", "crm.delete", "leads.fetch");
     }
 
     @Test
@@ -72,6 +72,29 @@ class McpIT extends MockIT {
         JsonNode sent = call("messaging.send", Map.of("to", "a@b.test", "body", "hi"), Map.of()).body().get("result");
         assertThat(sent.get("content").get(0).get("json").get("message_id").asText()).startsWith("msg_");
         assertThat(get("/admin/calls").body().get("mcp").asLong()).isEqualTo(4);
+    }
+
+    @Test
+    void crmDeleteRemovesEveryContactWithTheExternalRefAndIsSafeToRepeat() throws Exception {
+        call("crm.upsert", Map.of("external_ref", "d-1", "name", "Ada", "email", "a@x.test"), Map.of());
+        call("crm.upsert", Map.of("external_ref", "d-1", "name", "Ada", "email", "a@x.test"), Map.of());
+        call("crm.upsert", Map.of("external_ref", "keep", "name", "Bob", "email", "b@x.test"), Map.of());
+
+        JsonNode deleted = call("crm.delete", Map.of("external_ref", "d-1"), Map.of()).body().get("result");
+        JsonNode again = call("crm.delete", Map.of("external_ref", "d-1"), Map.of()).body().get("result");
+
+        assertThat(deleted.get("isError").asBoolean()).isFalse();
+        JsonNode json = deleted.get("content").get(0).get("json");
+        assertThat(json.get("external_ref").asText()).isEqualTo("d-1");
+        assertThat(json.get("deleted").asBoolean()).isTrue();
+        assertThat(json.get("deleted_count").asInt()).isEqualTo(2);
+        assertThat(again.get("isError").asBoolean()).isFalse();
+        assertThat(again.get("content").get(0).get("json").get("deleted").asBoolean()).isFalse();
+        assertThat(call("crm.get", Map.of("external_ref", "d-1"), Map.of()).body()
+                .get("result").get("content").get(0).get("json").get("contacts")).isEmpty();
+        assertThat(call("crm.get", Map.of("external_ref", "keep"), Map.of()).body()
+                .get("result").get("content").get(0).get("json").get("contacts")).hasSize(1);
+        assertThat(call("crm.delete", Map.of(), Map.of()).body().get("error").get("code").asInt()).isEqualTo(-32602);
     }
 
     @Test
