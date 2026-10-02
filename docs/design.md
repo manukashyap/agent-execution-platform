@@ -112,7 +112,7 @@ Unbounded-loop sources (fan-out, retries, tool loop, self-triggering via the SSR
 - **Pipeline:** filter (capability, state not OPEN, per-provider token bucket) then score `cost / latency / errRate` with weights by priority (HIGH latency-heavy, NORMAL cost-leaning, LOW cost-heavy; DEGRADED adds a penalty) then up to 2 fallbacks sharing the node's attempt budget. Every decision is stored in `llm_call` (`seq`, `reason`).
 - **Providers (assignment section 5):** A 200 ms / $0.010 / 100 RPS, B 500 ms / $0.004 / 500 RPS, vLLM 100 ms / $0.002 / 200 RPS. When vLLM's bucket is empty, NORMAL/LOW spill to B and HIGH to A. vLLM has no tool-calling capability, so tool turns go to A/B.
 - **Health state machine** (10 s windows, 6-window lookback, windows under 20 samples ignored so an idle provider cannot flap): HEALTHY to DEGRADED on p95 > 2 s in 2 consecutive windows; any to OPEN on error rate > 50 % or p95 > 5 s; OPEN to HALF_OPEN after 30 s; HALF_OPEN to HEALTHY after 10 probes with at most 2 failures, else OPEN; DEGRADED to HEALTHY after 3 windows with p95 <= 1.5 s. A DEGRADED provider keeps a deterministic 5 % probe share, which makes recovery observable (needs at least 40 req/s total).
-- **vLLM p95 > 2 s, measured** (`vllm-degradation.sh`, +3 s latency, about 55 req/s): DEGRADED about **26 s** after the latency change, HEALTHY about **46 s** after it was restored. Router state is in-memory per instance; sharing it via Redis is [D].
+- **vLLM p95 > 2 s, measured** (`vllm-degradation.sh`, +3 s latency, 40 req/s delivered): DEGRADED about **21 s** after the latency change, HEALTHY about **41 s** after it was restored. Router state is in-memory per instance; sharing it via Redis is [D].
 
 ## 9. MCP and tool execution [B]
 

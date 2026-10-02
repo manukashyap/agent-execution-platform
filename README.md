@@ -103,7 +103,7 @@ Each prints its own checks. They use `AEP_DEV_API_KEY` (default `aep-dev-key-t_d
 | `saga-charge-then-send.sh` | Charge (compensated by a refund) then a send that is forced to fail: the execution ends `COMPENSATED` with exactly one charge and one refund. `VARIANT=refund-fails` fails every refund: bounded retries, then `COMPENSATION_FAILED` with no refund |
 | `dry-run.sh` | The PDF §7 lead workflow in `DRY_RUN`: the read-only fetch and the LLM classify run live (one mock hit each); the CRM write and the send are mocked (zero hits); prints `/preview` and checks the mock call counters. `MOCK_LLM=true` mocks the classify too |
 | `failure-walkthrough.sh` | The PDF §9 timing (provider answers at 15 s, node timeout 10 s) under both idempotency modes, plus a worker kill, a dropped connection and a 429 with `Retry-After`. `native_key`: the re-call returns the stored charge, one charge; `none`: no second call, `NEEDS_ATTENTION`, one send; `worker_kill`, `drop`, `rate_limit`: still one charge. Select with `SCENARIOS`; set `RESTART_CMD` so the script can restart the app for `worker_kill`. Takes several minutes |
-| `vllm-degradation.sh` | Router health: steady traffic, vLLM made slow (3 s), router marks it `DEGRADED` and moves traffic to llm-b with a 5 % probe share, then latency restored and vLLM recovers through the probes. Needs about 40 req/s total for recovery (default `RATE=120` asks the curl driver for that); `RATE=5` shows only the degradation half |
+| `vllm-degradation.sh` | Router health: steady traffic, vLLM made slow (3 s), router marks it `DEGRADED` and moves traffic to llm-b with a 5 % probe share, then latency restored and vLLM recovers through the probes. Needs about 40 req/s total for recovery, which is the default `RATE=40`; the driver batches requests per tick with `curl --parallel` and prints the delivered rate with every poll. `RATE=5` shows only the degradation half |
 
 The mocks expose `/admin/*` hooks (latency, fail rate, rate limit, drop connection, reset, call counts) that these scripts drive.
 
@@ -139,7 +139,7 @@ Where the plan was overridden (full list with reasons in [docs/ai-usage.md](docs
 - Provider 409 "in progress" is retried (`EFFECT_IN_PROGRESS`); 429 releases the ledger row; 5xx expires the lease; timeouts keep it. An unknown effect surfaces as `NEEDS_ATTENTION`, not `FAILED` / `COMPENSATION_FAILED`.
 - Extra tables and columns beyond the spec: `execution_budget`, ledger `response`, a seeded `crm.delete` compensation tool.
 - The PDF §9 timing tests are scaled in the suite (3 s provider, 2 s timeout); the full-size PDF timing runs in `failure-walkthrough.sh`.
-- `vllm-degradation.sh` default rate raised from 50 to 120 after measuring that the curl driver delivered only about 35 req/s and vLLM never recovered.
+- `vllm-degradation.sh` default rate is 40 req/s, the minimum for recovery. The old curl-per-request driver delivered only about 35 req/s when asked for 50, so the driver now batches requests per tick (`curl --parallel`) and delivers the requested rate; it prints the measured rate.
 - Found and fixed by review: START_FAILED reconciliation, `node_run` rows closing exactly once, a budget-reservation reaper.
 
 ## Cut and stretch items
