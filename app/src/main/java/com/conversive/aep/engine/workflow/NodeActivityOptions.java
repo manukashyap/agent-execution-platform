@@ -14,6 +14,9 @@ final class NodeActivityOptions {
     /** Several heartbeat intervals ({@code HeartbeatingRunner.INTERVAL}); detects a dead worker. */
     static final Duration HEARTBEAT_TIMEOUT = Duration.ofSeconds(5);
 
+    /** Default compensation attempts when the node declares no retry policy of its own. */
+    static final int COMPENSATION_ATTEMPTS = 6;
+
     private static final Duration MIN_INTERVAL = Duration.ofMillis(1);
     private static final Duration MAX_INTERVAL = Duration.ofSeconds(60);
 
@@ -31,6 +34,27 @@ final class NodeActivityOptions {
                 .setCancellationType(node.sideEffecting()
                         ? ActivityCancellationType.WAIT_CANCELLATION_COMPLETED
                         : ActivityCancellationType.TRY_CANCEL)
+                .build();
+    }
+
+    /**
+     * Compensation of a node: always retried (bounded), and never cancelled mid-flight. A live forward lease
+     * ({@code EFFECT_IN_PROGRESS}) carries its own next-retry delay, so the lease end is waited out.
+     */
+    static ActivityOptions compensation(FrozenNode node) {
+        RetryOptions retry = node.retry() != null && node.retry().maxAttempts() > 1
+                ? retry(node.retry())
+                : RetryOptions.newBuilder()
+                        .setMaximumAttempts(COMPENSATION_ATTEMPTS)
+                        .setInitialInterval(Duration.ofMillis(500))
+                        .setBackoffCoefficient(2.0)
+                        .setMaximumInterval(Duration.ofSeconds(30))
+                        .build();
+        return ActivityOptions.newBuilder()
+                .setStartToCloseTimeout(Duration.ofSeconds(node.timeoutS()))
+                .setHeartbeatTimeout(HEARTBEAT_TIMEOUT)
+                .setRetryOptions(retry)
+                .setCancellationType(ActivityCancellationType.WAIT_CANCELLATION_COMPLETED)
                 .build();
     }
 

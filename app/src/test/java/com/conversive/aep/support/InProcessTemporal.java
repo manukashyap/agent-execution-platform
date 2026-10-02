@@ -1,5 +1,6 @@
 package com.conversive.aep.support;
 
+import com.conversive.aep.engine.activity.CompensationActivity;
 import com.conversive.aep.engine.activity.ExecutionStateActivity;
 import com.conversive.aep.engine.activity.NodeActivity;
 import com.conversive.aep.engine.temporal.TemporalProperties;
@@ -29,10 +30,12 @@ public class InProcessTemporal {
 
     @Bean(destroyMethod = "close")
     TestWorkflowEnvironment testWorkflowEnvironment(TemporalProperties properties, NodeActivity nodeActivity,
-                                                    ExecutionStateActivity stateActivity) {
+                                                    ExecutionStateActivity stateActivity,
+                                                    CompensationActivity compensationActivity) {
         TestWorkflowEnvironment env = TestWorkflowEnvironment.newInstance(
                 TestEnvironmentOptions.newBuilder().setUseTimeskipping(false).build());
-        WorkflowRegistrar.register(env.newWorker(properties.taskQueue()), List.of(nodeActivity, stateActivity));
+        WorkflowRegistrar.register(env.newWorker(properties.taskQueue()),
+                List.of(nodeActivity, stateActivity, compensationActivity));
         env.start();
         return env;
     }

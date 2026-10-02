@@ -1,5 +1,6 @@
 package com.conversive.aep.engine.temporal;
 
+import com.conversive.aep.engine.activity.CompensationActivity;
 import com.conversive.aep.engine.activity.ExecutionStateActivity;
 import com.conversive.aep.engine.activity.NodeActivity;
 import com.conversive.aep.engine.workflow.DagInterpreterWorkflowImpl;
@@ -14,8 +15,9 @@ import org.springframework.stereotype.Component;
 @Component
 public class WorkflowRegistrar {
 
-    public WorkflowRegistrar(Worker mainWorker, NodeActivity nodeActivity, ExecutionStateActivity stateActivity) {
-        register(mainWorker, List.of(nodeActivity, stateActivity));
+    public WorkflowRegistrar(Worker mainWorker, NodeActivity nodeActivity, ExecutionStateActivity stateActivity,
+                             CompensationActivity compensationActivity) {
+        register(mainWorker, List.of(nodeActivity, stateActivity, compensationActivity));
     }
 
     /** Also used by tests to register the same implementations on an in-process worker. */

@@ -69,7 +69,7 @@ public class DagInterpreterWorkflowImpl implements DagInterpreterWorkflow {
     }
 
     private ExecutionResult finish(ExecutionRequest request, StateCalls calls, ExecutionResult outcome) {
-        ExecutionResult result = outcome;
+        ExecutionResult result = new SagaRun(request, state, calls).compensateIfNeeded(outcome);
         JsonNode output = result.status() == ExecutionStatus.SUCCEEDED ? output() : null;
         TransitionResult end = calls.transition(TERMINAL_FROM, result.status(), result.errorCode(),
                 result.errorMessage(), output);

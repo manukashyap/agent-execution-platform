@@ -7,8 +7,6 @@ import com.conversive.aep.definition.model.FrozenDefinition.FrozenNode;
 import com.conversive.aep.definition.model.OnFailure;
 import com.conversive.aep.engine.activity.NodeActivity;
 import com.conversive.aep.engine.activity.NodeOutputRef;
-import com.conversive.aep.engine.activity.NodeTask;
-import com.conversive.aep.engine.activity.NodeTask.UpstreamRef;
 import com.conversive.aep.engine.workflow.condition.Condition;
 import com.conversive.aep.engine.workflow.condition.ConditionEvaluator;
 import com.conversive.aep.engine.workflow.condition.ValuePath;
@@ -349,18 +347,8 @@ final class ForwardRun {
         state.callStarted(node.id(), callIndex);
         NodeActivity stub = stubs.computeIfAbsent(node.id(),
                 id -> Workflow.newActivityStub(NodeActivity.class, NodeActivityOptions.forNode(node)));
-        inflight.put(Async.function(stub::run, task(node, callIndex)), new Call(node.id(), callIndex));
+        inflight.put(Async.function(stub::run, NodeTasks.of(request, state, node, callIndex)),
+                new Call(node.id(), callIndex));
         return true;
-    }
-
-    private NodeTask task(FrozenNode node, int callIndex) {
-        List<UpstreamRef> upstream = state.succeededAncestors(node).stream()
-                .filter(id -> definition.node(id).map(n -> !CONDITION.equals(n.type())).orElse(false))
-                .map(id -> new UpstreamRef(id, state.isFanOut(id)))
-                .toList();
-        String itemsPath = node.forEach() == null ? null : node.forEach().items();
-        return new NodeTask(request.tenantId(), request.executionId(), definition.workflowId(),
-                definition.version(), node.id(), node.type(), callIndex, node.sideEffecting(), node.config(),
-                upstream, itemsPath, node.timeoutS(), request.mode(), request.priority(), request.dryRun());
     }
 }
