@@ -116,3 +116,70 @@ P1 deviations from docs/06 and docs/07:
 - **Cancel:** describes the run first and only sends a cancel when the run is RUNNING. If there is no open run, the row is CAS'd to CANCELLED directly.
 - **Start retries:** 3 inline attempts with linear backoff (`aep.engine.launcher.*`). After that the row becomes START_FAILED and the API returns 503 with Retry-After.
 - **Open:** a replay of an Idempotency-Key whose execution is START_FAILED returns that dead execution id. If Temporal actually started but the client saw a failure, the row says START_FAILED while the run exists; reconciliation is left to a later phase.
+
+P4 (tools / MCP) deviations and assumptions:
+
+- **Credentials:** `ToolCredentialProvider` reads `AEP_TOOL_CRED_<TENANT>_<TOOL>`. Tenant and tool are upper-cased, and every character outside `[A-Z0-9]` becomes `_`. If that variable is unset, it falls back to `aep.tools.dev-credential` (`AEP_TOOL_DEV_CREDENTIAL`, empty by default, in which case no header is sent). The credential is sent only as `Authorization: Bearer` on the MCP call. It never appears in args, node output, audit, logs or prompts, and `ToolsProperties.toString` masks it.
+- **`tool_call_audit` (V4):** has no FKs, matching `llm_call`. There is one row per attempt. Args are stored only as a SHA-256 of key-sorted canonical JSON. `effect_key` is set only for side-effecting tools. An audit write failure is logged and never masks the tool result.
+- **READ_ONLY tools bypass the effect ledger.** Side-effecting tools go through `LedgerSideEffectGuard`. LOOKUP reconcile renders the registry lookup spec against `{args}`, and treats the effect as "found" when the first array field of the lookup result is non-empty. This heuristic is an assumption.
+- **MCP error mapping:**
+  - `-32602`/`-32600` → `VALIDATION_FAILED`.
+  - `-32601` → `TOOL_NOT_FOUND`.
+  - `isError` with `in_progress`, or 409 → `EFFECT_IN_PROGRESS` (retryable).
+  - 429 → `UPSTREAM_RATE_LIMITED`.
+  - Other 4xx → `UPSTREAM_CLIENT_ERROR`.
+  - Anything else → `UPSTREAM_UNAVAILABLE` (retryable).
+- **mocks `crm.delete`:** returns 200 with `deleted:false` when it is repeated (idempotent).
+- **LLM tool round:**
+  - Only READ_ONLY tools may be offered. A side-effecting tool in `tools`, or a model asking for an unlisted tool, → `TOOL_FORBIDDEN`.
+  - `maxToolCalls` defaults to 1 and must be 1–3, otherwise `VALIDATION_FAILED`. A model exceeding it → `TOOL_CALL_LIMIT`.
+  - Tool output goes back to the model as a `role:tool` message `{"untrusted":true,"tool":..,"data":..}`, truncated to 16k chars, behind a system guard message.
+  - Tool names are sent verbatim, dots included. The mocks accept this; real OpenAI-style providers may need name mapping.
+  - Tool calls cost 0 against the budget; budget is charged per LLM turn by the router.
+  - In-round tool calls reuse the node's `callIndex` in the audit. They are READ_ONLY, so they have no ledger key.
+- **Not done here (outside P4 ownership):** a definition-validator rule to reject llm nodes whose `tools` include non-READ_ONLY tools or whose `maxToolCalls` is outside 1–3. Today this is enforced at runtime only. `/v1/tools` relies on the P1 auth filter populating `TenantContext`, and returns 401 when it is absent.
+
+P7 (tenancy and cost, T7.1–T7.3) deviations and assumptions:
+
+- **Extra V5 table `execution_budget`:** docs/06 lists only `tenant_budget` and `budget_reservation`. A per-execution counter row (`limit_usd`, `reserved_usd`, `spent_usd`) makes the per-execution cap atomic under concurrent `forEach` reservations, using the same conditional `UPDATE … WHERE spent+reserved+amt <= limit` as the tenant row. It has no FK to `workflow_execution`.
+- **`node_id` / `call_index` parsed from the ref:** the `BudgetService` interface is unchanged; the router's ref `llm:{nodeId}:{callIndex}:…` is parsed into those columns (null if unparseable).
+- **Execution cap derivation (SQL, lazily on the first reservation):**
+  - Uses the definition's `limits.max_cost_usd` (or `maxCostUsd`) when set.
+  - Otherwise, for DRY_RUN, `LEAST(tenant ceiling, aep.cost.dry-run-max-cost-usd = 0.50)`.
+  - Otherwise the ceiling, which is `tenant_limits.max_cost_usd`, falling back to `aep.cost.fallback-execution-max-cost-usd = 5`.
+- **Tenant budget:** the row is created lazily at `aep.cost.default-tenant-budget-usd = 100`, MONTHLY. There is no period rollover job and no stale-reservation reaper; both are design-only.
+- **Confirm/cancel:** a late confirm after a cancel still records the spend, without releasing twice. Confirming an unknown or already-confirmed id is a no-op (a warn is logged for a non-UUID id).
+- **Admission:**
+  - The token bucket is per replica (in-memory), so the effective rate is the configured rate × the number of replicas.
+  - The rate is checked before the concurrency cap, so a request rejected by the cap still consumes a token.
+  - The concurrency cap is soft (a derived `count(*)` of live executions). Overshoot is bounded by the number of concurrent admitters.
+  - Tenant limits and tiers are cached for 30s (`aep.tenancy.limits-refresh`). A missing `tenant_limits` row uses the `aep.tenancy.default-*` values.
+- **Temporal priority:**
+  - The tier sets the base priority key: ENTERPRISE 2, STANDARD 3, FREE 4. The execution's priority shifts it: HIGH −1, LOW +1. The result is clamped to 1–5.
+  - `fairnessKey` = tenant id. `fairnessWeight` is ENTERPRISE 4, STANDARD 2, FREE 1.
+  - `TemporalExecutionLauncher` keeps its 4-arg constructor, which uses `TemporalPriorityPolicy.uniform()`; Spring uses the 5-arg one.
+- **Test fixture:** `LlmExecutorIT` now inserts its tenant row, because budget rows have an FK to `tenant`.
+- **Load tests:** new tenants get `rate_per_sec` 10 / `burst` 20 by default. Load-test tenants need their `tenant_limits` raised (P9).
+
+P8 (observability, T8.1/T8.2) deviations and assumptions:
+
+- **No tenant_id label anywhere.** The tier comes from `CachedTenantTiers`, the same 30s cache the priority policy uses. `MetricsPrometheusIT` scans `/actuator/prometheus` to check this. The per-tenant view is the `/trace` endpoint.
+- **queue_depth** is a gauge refreshed every `aep.observability.queue-depth.refresh` (10s) by `QueueDepthMonitor`. It has a `source` label and no tenant_tier:
+  - `temporal_workflow` and `temporal_activity`: DescribeTaskQueue backlog, 2s deadline.
+  - `admission_queued`: a global `count(*)` of QUEUED executions. This is a deliberate cross-tenant query; it returns no tenant data.
+  - Refresh failures keep the last value. The first failure is warned; later ones are logged at debug.
+- **Extra meters beyond the PDF list:**
+  - `tool_call_latency{provider=<tool>, outcome}`
+  - `schedule_to_start{tenant_tier}`
+  - `admission_rejections{tenant_tier, reason}`
+  - `budget_rejections{tenant_tier, reason}`
+- **Tool labels:** tools go in the `provider` label. LLM and tool errors share `provider_errors_total{provider, error_class}`. The tool label is set only after authorisation, so an unvetted tool name never becomes a label.
+- **side_effect_unknown** counts only the PENDING→UNKNOWN transition in the guard. The reconciler's NEEDS_ATTENTION is not counted.
+- **Engine-owned meters:** `executionCompleted`, `nodeCompleted`, `nodeRetried`, `compensation` and `scheduleToStart` are exposed on `AepMetrics`. Their call sites live in engine.activity / execution.*, which are owned by the P2 agent.
+- **Trace endpoint:**
+  - It replaces the P1 501 stub. It reads all its tables in one REPEATABLE READ read-only transaction.
+  - Nodes are keyed by (nodeId, callIndex, phase). LLM calls attach to FORWARD.
+  - Node types come from the pinned definition spec; anything not in it is `unknown`.
+  - `llmFallbacks` counts calls with seq > 0.
+  - Budget totals are the per-execution reservation sums (reserved = still RESERVED).
+- **`TemporalTaskQueueBacklog`** has no dedicated test. The DescribeTaskQueue API was verified in T0.7.

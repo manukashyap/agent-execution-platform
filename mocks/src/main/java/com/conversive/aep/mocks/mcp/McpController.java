@@ -92,6 +92,7 @@ public class McpController {
             case "messaging.send" -> messaging.send(mapper.treeToValue(arguments, MessagingService.SendRequest.class));
             case "crm.upsert" -> crm.create(mapper.treeToValue(arguments, CrmService.ContactRequest.class));
             case "crm.get" -> crm.findByExternalRef(requiredText(arguments, "external_ref"));
+            case "crm.delete" -> crm.deleteByExternalRef(requiredText(arguments, "external_ref"));
             default -> leads.fetch(arguments.has("limit") ? arguments.get("limit").asInt() : null);
         };
     }

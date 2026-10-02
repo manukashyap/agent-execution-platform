@@ -16,12 +16,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
@@ -40,10 +42,18 @@ public class LlmExecutor implements NodeExecutor {
 
     private final LlmRouter router;
     private final ObjectMapper mapper;
+    private final LlmToolRound tools;
 
+    /** Without a tool round: {@code tools} in the config is rejected. */
     public LlmExecutor(LlmRouter router, ObjectMapper mapper) {
+        this(router, mapper, null);
+    }
+
+    @Autowired
+    public LlmExecutor(LlmRouter router, ObjectMapper mapper, LlmToolRound tools) {
         this.router = router;
         this.mapper = mapper;
+        this.tools = tools;
     }
 
     @Override
@@ -64,13 +74,21 @@ public class LlmExecutor implements NodeExecutor {
     }
 
     /**
-     * Extension point for the P4 AI tool round (T4.5): config {@code tools: [toolName…]} and
-     * {@code maxToolCalls} (default 1, cap 3 → {@code TOOL_CALL_LIMIT}); loop LLM → tool_call →
-     * {@code ToolGateway.invoke} → LLM inside this one activity, every turn through the router with
-     * {@code turn} incremented and the {@code tools} capability required.
+     * The AI tool round (T4.5, {@link LlmToolRound}): config {@code tools: [READ_ONLY toolName…]} and
+     * {@code maxToolCalls} (default 1, cap 3 → {@code TOOL_CALL_LIMIT}). Output adds {@code tool_results:
+     * [{tool, result}]}; cost and tokens are summed over every turn.
      */
     protected NodeResult toolRound(NodeContext ctx, JsonNode config, LlmRequest firstTurn) {
-        throw new NonRetryableError(ErrorCodes.VALIDATION_FAILED, "llm node 'tools' is not supported yet (P4)");
+        if (tools == null) {
+            throw new NonRetryableError(ErrorCodes.VALIDATION_FAILED, "llm node 'tools' is not supported here");
+        }
+        LlmToolRound.Outcome outcome = tools.run(ctx, config, firstTurn);
+        NodeResult last = toResult(outcome.finalResponse());
+        ObjectNode output = ((ObjectNode) last.output()).set("tool_results", outcome.toolResults());
+        Map<String, String> meta = new LinkedHashMap<>(last.meta());
+        meta.put("turns", Integer.toString(outcome.turns()));
+        meta.put("tool_calls", Integer.toString(outcome.toolResults().size()));
+        return new NodeResult(output, outcome.costUsd(), outcome.tokens(), meta);
     }
 
     NodeResult toResult(LlmResponse response) {

@@ -13,6 +13,8 @@ import com.conversive.aep.common.RetryableError;
 import com.conversive.aep.common.TenantId;
 import com.conversive.aep.cost.BudgetService;
 import com.conversive.aep.cost.Reservation;
+import com.conversive.aep.observability.AepMetrics;
+import com.conversive.aep.tenancy.TenantTier;
 import com.conversive.aep.support.MutableClock;
 import java.math.BigDecimal;
 import java.time.Duration;
@@ -25,6 +27,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 
 class LlmRouterTest {
@@ -37,6 +40,8 @@ class LlmRouterTest {
     private final AtomicLong nanos = new AtomicLong();
     private final FakeClient client = new FakeClient();
     private final CountingBudget budget = new CountingBudget();
+    private final SimpleMeterRegistry registry = new SimpleMeterRegistry();
+    private final AepMetrics metrics = new AepMetrics(registry, tenant -> TenantTier.STANDARD);
     private final List<LlmCallRecord> rows = new ArrayList<>();
     private final LlmCallRecorder recorder = new LlmCallRecorder() {
         @Override
@@ -54,7 +59,7 @@ class LlmRouterTest {
 
     private LlmRouter router() {
         return new LlmRouter(RouterFixtures.planner(providers), client, budget, recorder,
-                new RecentDecisions(clock, WINDOW), Duration.ofSeconds(1), nanos::get);
+                new RecentDecisions(clock, WINDOW), Duration.ofSeconds(1), nanos::get, metrics);
     }
 
     /** Provider behaviour: a latency (charged to the fake ticker) and an optional error. */
@@ -177,6 +182,16 @@ class LlmRouterTest {
         assertThat(budget.cancelled.get()).isEqualTo(1);
         assertThat(budget.confirmed.get()).isEqualTo(1);
         assertThat(budget.refs).containsExactly("llm:n1:0:1:0:0", "llm:n1:0:1:0:1");
+        assertThat(registry.get(AepMetrics.ROUTER_DECISIONS).tags(AepMetrics.TAG_PROVIDER, "llm-b",
+                AepMetrics.TAG_REASON, RouteReasons.FALLBACK_AFTER_ERROR).counter().count()).isEqualTo(1);
+        assertThat(registry.get(AepMetrics.PROVIDER_ERRORS).tags(AepMetrics.TAG_PROVIDER, "vllm",
+                AepMetrics.TAG_ERROR_CLASS, ErrorCodes.UPSTREAM_UNAVAILABLE).counter().count()).isEqualTo(1);
+        assertThat(registry.get(AepMetrics.LLM_TOKENS).tags(AepMetrics.TAG_PROVIDER, "llm-b",
+                AepMetrics.TAG_DIRECTION, AepMetrics.DIRECTION_PROMPT).counter().count()).isEqualTo(10);
+        assertThat(registry.get(AepMetrics.LLM_COST_USD).tags(AepMetrics.TAG_PROVIDER, "llm-b").counter().count())
+                .isEqualTo(0.00006, org.assertj.core.data.Offset.offset(1e-9));
+        assertThat(registry.get(AepMetrics.LLM_LATENCY).tags(AepMetrics.TAG_OUTCOME, AepMetrics.OUTCOME_FAILED)
+                .timer().count()).isEqualTo(1);
     }
 
     @Test

@@ -63,10 +63,28 @@ aep:
       run-timeout-slack: 1h
   api:
     start-failed-retry-after-s: 5
+  tools:
+    mcp-url: ${AEP_MOCKS_BASE_URL:http://localhost:8090}/mcp
+    dev-credential: ${AEP_TOOL_DEV_CREDENTIAL:}
   tenancy:
+    # used only for tenants without a tenant_limits row; the row's rate_per_sec / burst / max_concurrent win
+    default-rate-per-sec: 10
+    default-burst: 20
+    default-max-concurrent: 50
+    limits-refresh: 30s
+    concurrency-retry-after: 5s
     dev:
       dev-api-key: ${AEP_DEV_API_KEY:}
       other-api-key: ${AEP_DEV_OTHER_API_KEY:}
+  observability:
+    queue-depth:
+      enabled: true
+      refresh: 10s
+      describe-timeout: 2s
+  cost:
+    default-tenant-budget-usd: 100
+    dry-run-max-cost-usd: 0.50
+    fallback-execution-max-cost-usd: 5
   router:
     # cost is USD per 1,000 tokens (prompt + completion); rps = token-bucket capacity and refill per second
     providers:

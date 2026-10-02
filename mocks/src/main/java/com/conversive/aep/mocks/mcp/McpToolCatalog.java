@@ -24,6 +24,8 @@ final class McpToolCatalog {
                                 List.of("external_ref", "name", "email"))),
                 tool("crm.get", "Look up CRM contacts by external reference.",
                         schema(Map.of("external_ref", "string"), List.of("external_ref"))),
+                tool("crm.delete", "Delete every CRM contact with an external reference (inverse of crm.upsert).",
+                        schema(Map.of("external_ref", "string"), List.of("external_ref"))),
                 tool("leads.fetch", "Fetch leads (read-only).",
                         schema(Map.of("limit", "integer"), List.of())));
     }

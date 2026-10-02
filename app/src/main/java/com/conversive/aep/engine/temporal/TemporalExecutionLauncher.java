@@ -8,6 +8,7 @@ import com.conversive.aep.engine.ExecutionLauncher;
 import com.conversive.aep.engine.workflow.DagInterpreterWorkflow;
 import com.conversive.aep.engine.workflow.ExecutionRequest;
 import com.conversive.aep.engine.workflow.WorkflowNames;
+import com.conversive.aep.tenancy.TemporalPriorityPolicy;
 import io.temporal.api.enums.v1.WorkflowIdConflictPolicy;
 import io.temporal.api.enums.v1.WorkflowExecutionStatus;
 import io.temporal.api.enums.v1.WorkflowIdReusePolicy;
@@ -20,6 +21,7 @@ import java.time.Clock;
 import java.time.Duration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
@@ -37,13 +39,21 @@ public class TemporalExecutionLauncher implements ExecutionLauncher {
     private final TemporalProperties temporal;
     private final LauncherProperties props;
     private final Clock clock;
+    private final TemporalPriorityPolicy priorityPolicy;
 
     public TemporalExecutionLauncher(WorkflowClient client, TemporalProperties temporal, LauncherProperties props,
                                      Clock clock) {
+        this(client, temporal, props, clock, TemporalPriorityPolicy.uniform());
+    }
+
+    @Autowired
+    public TemporalExecutionLauncher(WorkflowClient client, TemporalProperties temporal, LauncherProperties props,
+                                     Clock clock, TemporalPriorityPolicy priorityPolicy) {
         this.client = client;
         this.temporal = temporal;
         this.props = props;
         this.clock = clock;
+        this.priorityPolicy = priorityPolicy;
     }
 
     @Override
@@ -98,6 +108,7 @@ public class TemporalExecutionLauncher implements ExecutionLauncher {
                 .setWorkflowIdConflictPolicy(WorkflowIdConflictPolicy.WORKFLOW_ID_CONFLICT_POLICY_USE_EXISTING)
                 .setWorkflowIdReusePolicy(WorkflowIdReusePolicy.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE)
                 .setWorkflowExecutionTimeout(runTimeout)
+                .setPriority(priorityPolicy.priorityFor(request.tenantId(), request.priority()))
                 .build();
     }
 

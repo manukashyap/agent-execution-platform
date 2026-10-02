@@ -32,7 +32,9 @@ Request `{model, messages:[{role, content, tool_call_id?}], tools?}`.
 
 ## MCP
 
-Tools: `payments.charge`, `payments.refund`, `messaging.send`, `crm.upsert`, `crm.get`, `leads.fetch` (input schemas mirror the REST bodies).
+Tools: `payments.charge`, `payments.refund`, `messaging.send`, `crm.upsert`, `crm.get`, `crm.delete`, `leads.fetch` (input schemas mirror the REST bodies).
+
+- `crm.delete {external_ref}` (the compensation of `crm.upsert`) deletes every contact with that ref and returns `{external_ref, deleted, deleted_count}`; repeating it returns `deleted:false`, not an error, so a retried compensation is safe. Hits count on `crm.delete`.
 
 - Success: `result: {content:[{type:"json", json:<service response>}], isError:false}`.
 - Tool failure (injected failure, missing idempotency key, in-flight 409, unknown charge): `isError:true`, `json: {error, status}`.

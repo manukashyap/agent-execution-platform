@@ -118,6 +118,8 @@ class ExactlyOnceScenariosIT extends LedgerTestSupport {
         }
 
         assertThat(row(attempt1).state()).isEqualTo(LedgerState.UNKNOWN);
+        assertThat(meters.get(com.conversive.aep.observability.AepMetrics.SIDE_EFFECT_UNKNOWN).counter().count())
+                .as("counted once, on the PENDING to UNKNOWN transition").isEqualTo(1);
         wireMock.verify(exactly(1), postRequestedFor(urlEqualTo("/messages/send")));
     }
 

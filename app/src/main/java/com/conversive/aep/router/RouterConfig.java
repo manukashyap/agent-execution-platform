@@ -1,6 +1,7 @@
 package com.conversive.aep.router;
 
 import com.conversive.aep.cost.BudgetService;
+import com.conversive.aep.observability.AepMetrics;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
@@ -23,8 +24,8 @@ public class RouterConfig {
 
     @Bean
     LlmRouter llmRouter(RoutePlanner planner, LlmProviderClient client, BudgetService budget, LlmCallRecorder recorder,
-            RouterProperties properties, Clock clock) {
+            RouterProperties properties, Clock clock, AepMetrics metrics) {
         return new LlmRouter(planner, client, budget, recorder, new RecentDecisions(clock, DECISION_HORIZON),
-                properties.noProviderRetryDelay(), System::nanoTime);
+                properties.noProviderRetryDelay(), System::nanoTime, metrics);
     }
 }

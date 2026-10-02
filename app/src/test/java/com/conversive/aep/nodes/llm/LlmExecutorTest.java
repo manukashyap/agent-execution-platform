@@ -22,6 +22,9 @@ import com.conversive.aep.router.ProviderRuntime;
 import com.conversive.aep.router.RecentDecisions;
 import com.conversive.aep.router.RoutePlanner;
 import com.conversive.aep.router.RouterProperties;
+import com.conversive.aep.observability.AepMetrics;
+import com.conversive.aep.tenancy.TenantTier;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.net.URI;
@@ -63,7 +66,8 @@ class LlmExecutorTest {
             }
         };
         return new LlmRouter(planner, client, new NoOpBudgetService(), recorder,
-                new RecentDecisions(clock, Duration.ofSeconds(10)), Duration.ofSeconds(1), System::nanoTime);
+                new RecentDecisions(clock, Duration.ofSeconds(10)), Duration.ofSeconds(1), System::nanoTime,
+                new AepMetrics(new SimpleMeterRegistry(), tenant -> TenantTier.STANDARD));
     }
 
     private static NodeContext context(String configJson, Duration startToClose, Priority priority) throws Exception {
