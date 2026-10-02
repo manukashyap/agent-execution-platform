@@ -316,7 +316,7 @@ Each cut = one README line + its design-doc section, committed as `docs: cut <it
 | Doc skeleton ★ | D1·5 | 0.50 | ✅ | ✅ | `docs/design.md` drafted (≈3.6 k words, trim ~600 in P10) |
 | P5 ★ | D2·1 | 1.50 | 🟡 | ☐ | T5.1/T5.2/T5.4 guard-level + mocks T5.3 done (ledger ITs green); engine-level §9 tests + walkthrough wait on P2a |
 | P3 ★ | D2·2 | 1.50 | 🟡 | ☐ | T3.1–T3.4 green (72 router tests + LlmExecutorIT); `vllm-degradation.sh` written, not yet run end-to-end |
-| P4 | D2·3 | 1.25 | ☐ | ☐ | |
+| P4 | D2·3 | 1.25 | ✅ | ✅ | T4.1–T4.5 green (200 tests); gateway + `mcp` node + LLM tool round (READ_ONLY, ≤3 calls, untrusted tool output); `/v1/tools` behind auth |
 | P6 ★ | D2·4 | 0.75 | ☐ | ☐ Checkpoint B | |
 | P7 | D2·5 | 0.75 | ☐ | ☐ | |
 | P8 | D2·6 | 0.50 | ☐ | ☐ | |
