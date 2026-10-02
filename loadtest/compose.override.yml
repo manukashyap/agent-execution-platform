@@ -1,0 +1,12 @@
+# Load-test overlay: enables pg_stat_statements on the shared Postgres (app DB `aep` + Temporal DBs).
+# Used as: docker compose -f ../compose.yml -f compose.override.yml ... (see run.sh)
+services:
+  postgres:
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - pg_stat_statements.track=all
+      - -c
+      - pg_stat_statements.max=10000

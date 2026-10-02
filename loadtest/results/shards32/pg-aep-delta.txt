@@ -1,0 +1,25 @@
+blks_hit | 90545953
+blks_read | 52046
+tup_deleted | 47
+tup_fetched | 97206841
+tup_inserted | 240761
+tup_returned | 152483732
+tup_updated | 151490
+wal_bytes (cluster) | 2923179355
+xact_commit | 789417
+table:budget_reservation:ins | 8026
+table:budget_reservation:upd | 8025
+table:execution_budget:ins | 8026
+table:execution_budget:upd | 16051
+table:llm_call:ins | 8025
+table:node_output:ins | 94775
+table:node_run:ins | 94780
+table:node_run:upd | 94772
+table:tenant:ins | 2
+table:tenant_budget:upd | 16051
+table:tenant_limits:ins | 2
+table:tenant_tool_grant:ins | 9
+table:tool_registry:ins | 7
+table:workflow_definition:ins | 3
+table:workflow_execution:ins | 25727
+table:workflow_execution:upd | 15940

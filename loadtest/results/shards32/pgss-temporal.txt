@@ -1,0 +1,17 @@
+calls | total_ms | mean_ms | rows | query
+226704 | 17105 | 0.075 | 226704 | INSERT INTO history_node (shard_id, tree_id, branch_id, node_id, prev_txn_id, txn_id, data, data_encoding) VAL
+19992 | 16276 | 0.814 | 203921 | SELECT visibility_timestamp, task_id, data, data_encoding FROM timer_tasks WHERE shard_id = $1 AND ((visibilit
+258648 | 8900 | 0.034 | 258648 | SELECT shard_id, namespace_id, workflow_id, run_id, create_request_id, state, status, start_time, last_write_v
+258647 | 8346 | 0.032 | 258647 | UPDATE executions SET db_record_version = $1, next_event_id = $2, last_write_version = $3, data = $4, data_enc
+284376 | 8104 | 0.028 | 284376 | SELECT range_id FROM shards WHERE shard_id = $1 FOR SHARE
+258647 | 8056 | 0.031 | 258647 | SELECT db_record_version, next_event_id FROM executions WHERE shard_id = $1 AND namespace_id = $2 AND workflow
+258648 | 6500 | 0.025 | 258648 | UPDATE current_executions SET run_id = $1, create_request_id = $2, state = $3, status = $4, start_time = $5, l
+193732 | 5976 | 0.031 | 193732 | INSERT INTO timer_tasks (shard_id, visibility_timestamp, task_id, data, data_encoding) VALUES ($1, $2, $3, $4,
+122422 | 5253 | 0.043 | 122422 | INSERT INTO activity_info_maps (shard_id, namespace_id, workflow_id, run_id, schedule_id, data,data_encoding) 
+54274 | 4979 | 0.092 | 201069 | SELECT node_id, prev_txn_id, txn_id, data, data_encoding FROM history_node WHERE shard_id = $1 AND tree_id = $
+652 | 4568 | 7.006 | 57775 | DELETE FROM tasks_v2 WHERE range_hash = $1 AND task_queue_id = $2 AND task_id IN (SELECT task_id FROM tasks_v2
+25727 | 2943 | 0.114 | 25727 | INSERT INTO executions(shard_id, namespace_id, workflow_id, run_id, next_event_id, last_write_version, data, d
+50048 | 2939 | 0.059 | 50048 | INSERT INTO tasks_v2 ( range_hash, task_queue_id, task_id, pass, data, data_encoding) VALUES ($1, $2, $3, $4, 
+401221 | 2931 | 0.007 | 0 | BEGIN READ WRITE
+79800 | 2423 | 0.030 | 79800 | INSERT INTO transfer_tasks(shard_id, task_id, data, data_encoding) VALUES($1, $2, $3, $4)
+(15 rows)

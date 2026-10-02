@@ -1,0 +1,20 @@
+blks_hit | 609062
+blks_read | 84
+tup_deleted | 6
+tup_fetched | 136244
+tup_inserted | 23875
+tup_returned | 1362335
+tup_updated | 16274
+wal_bytes (cluster) | 183315030
+xact_commit | 71552
+table:budget_reservation:ins | 848
+table:budget_reservation:upd | 848
+table:execution_budget:ins | 848
+table:execution_budget:upd | 1696
+table:llm_call:ins | 848
+table:node_output:ins | 10179
+table:node_run:ins | 10179
+table:node_run:upd | 10179
+table:tenant_budget:upd | 1696
+table:workflow_execution:ins | 850
+table:workflow_execution:upd | 1700

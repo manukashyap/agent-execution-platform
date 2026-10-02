@@ -1,0 +1,8 @@
+{"workflow_id":"lead_enrichment_lt","version":1,"max_parallel":16,"nodes":[
+  {"id":"fetch_leads","type":"http","config":{"url":"http://mocks:8090/leads?limit=10","method":"GET"}},
+  {"id":"classify","type":"llm","depends_on":["fetch_leads"],
+   "config":{"prompt":"Classify these leads as hot, warm or cold: {{fetch_leads.body}}"}},
+  {"id":"enrich","type":"http","depends_on":["fetch_leads","classify"],
+   "for_each":{"items":"$.fetch_leads.body.leads","max_concurrency":10},
+   "config":{"url":"http://mocks:8090/crm/contacts","method":"POST",
+             "body":{"external_ref":"{{item.id}}","name":"{{item.name}}","email":"{{item.email}}"}}}]}

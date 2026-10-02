@@ -226,3 +226,10 @@ P8 (observability, T8.1/T8.2) deviations and assumptions:
 - **Walkthrough status parsing:** the execution JSON nests `status` fields (node bodies), so the script reads the one after `version`. A worker kill at ~12 s lands after attempt 1 timed out at 9 s, so it hits the lease wait, not the in-flight call.
 - **vllm-degradation default RATE 50 to 120:** the curl-per-request driver delivered about 35 req/s when asked for 50, so DEGRADED probe windows held 18 samples (< 20) and vLLM never recovered. At 120 it delivers about 55 req/s.
 - **Shared Temporal:** script runs used `AEP_TEMPORAL_TASK_QUEUE=aep-p5-walkthrough` so other worktrees' workers could not pick up the activities.
+
+### P9 T9.1-T9.3 load test notes
+
+- **Isolated stack:** `loadtest/run.sh` uses compose project `aeplt` (fresh volumes, removed by `run.sh down`) so it never touches a shared `aep` stack. `loadtest/compose.override.yml` only adds `pg_stat_statements` to Postgres; `compose.yml` and app defaults are unchanged. The three load-test tenants get raised `tenant_limits` / `tenant_budget` through `loadtest/seed.sql`, with random API keys per run (kept in git-ignored `loadtest/out/keys.env`, stored hashed).
+- **Workflow shape:** the forEach node is an http call (CRM mock) rather than an LLM call, because router provider rps (llm-a 100, llm-b 500, vllm 200) would cap a 10x fan-out of LLM calls at about 80 executions/s and the test would measure the router, not the engine. One LLM node (`classify`) per execution keeps the router/budget path in the picture.
+- **Outcome:** the saturation knee is about 25 executions/s on this laptop, limited by Temporal + its Postgres, not by the app. Details and the 10x plan are in `loadtest/RESULTS.md`; raw captures are in `loadtest/results/`.
+- **Flake gate:** `SideEffectEngineIT` passed 5 of 5 consecutive runs (4 tests each, no flake, no change made).

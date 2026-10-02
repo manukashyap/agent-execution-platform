@@ -1,0 +1,13 @@
+tenant_id | status | n | p50_s | p95_s | p99_s | max_s
+lt_heavy | FAILED | 4452 | 331.17 | 409.40 | 423.33 | 427.54
+lt_heavy | QUEUED | 7826 |  |  |  | 
+lt_heavy | RUNNING | 2288 |  |  |  | 
+lt_heavy | SUCCEEDED | 7673 | 80.37 | 324.08 | 385.20 | 424.15
+lt_light1 | FAILED | 105 | 99.83 | 124.21 | 128.09 | 131.76
+lt_light1 | QUEUED | 1164 |  |  |  | 
+lt_light1 | RUNNING | 1 |  |  |  | 
+lt_light1 | SUCCEEDED | 481 | 0.36 | 1.62 | 8.63 | 9.08
+lt_light2 | FAILED | 99 | 99.83 | 126.50 | 130.37 | 132.15
+lt_light2 | QUEUED | 1169 |  |  |  | 
+lt_light2 | SUCCEEDED | 483 | 0.36 | 2.39 | 8.64 | 9.27
+(11 rows)
