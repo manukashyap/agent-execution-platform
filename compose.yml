@@ -163,6 +163,10 @@ services:
       AEP_DB_URL: jdbc:postgresql://postgres:5432/aep
       AEP_TEMPORAL_TARGET: temporal:7233
       AEP_OUTBOUND_ALLOW_HOSTS: mocks:8090
+      AEP_MOCKS_BASE_URL: http://mocks:8090
+      AEP_LLM_A_URL: http://mocks:8090/llm/llm-a
+      AEP_LLM_B_URL: http://mocks:8090/llm/llm-b
+      AEP_VLLM_URL: http://mocks:8090/llm/vllm
       AEP_OUTBOUND_SELF_HOSTS: app:8000,localhost:8000
       AEP_DEV_API_KEY: ${AEP_DEV_API_KEY:-aep-dev-key-t_dev}
       AEP_DEV_OTHER_API_KEY: ${AEP_DEV_OTHER_API_KEY:-aep-dev-key-t_other}
