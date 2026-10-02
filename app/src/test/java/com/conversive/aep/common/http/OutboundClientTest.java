@@ -177,6 +177,19 @@ class OutboundClientTest {
     }
 
     @Test
+    void clientErrorKeepsStatusAndBodySoCallersCanReinterpretA409() {
+        wireMock.stubFor(get("/busy").willReturn(aResponse().withStatus(409)
+                .withHeader("Content-Type", "application/json").withBody("{\"error\":\"in_progress\"}")));
+
+        assertThatThrownBy(() -> client.send(OutboundRequest.get(uri("/busy"), TIMEOUT, ExecutionMode.LIVE)))
+                .isInstanceOfSatisfying(UpstreamClientError.class, e -> {
+                    assertThat(e.code()).isEqualTo(ErrorCodes.UPSTREAM_CLIENT_ERROR);
+                    assertThat(e.status()).isEqualTo(409);
+                    assertThat(e.body().get("error").asText()).isEqualTo("in_progress");
+                });
+    }
+
+    @Test
     void doesNotFollowRedirects() {
         wireMock.stubFor(get("/redirect").willReturn(aResponse().withStatus(302)
                 .withHeader("Location", "http://169.254.169.254/")));
