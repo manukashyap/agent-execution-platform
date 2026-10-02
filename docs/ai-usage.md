@@ -100,3 +100,25 @@ P3 (router) deviations and assumptions:
 - **Recovery needs ≥ 40 req/s total:** recovery requires 3 windows with ≥ 20 samples each. While DEGRADED, vLLM gets only the 5 % probe share, so total traffic must be at least 20 / (0.05 × 10 s) = 40 req/s. `scripts/vllm-degradation.sh` therefore defaults to 50 req/s, not 5.
 - **Debug endpoint:** `/internal/router/complete` and `/internal/router/state` exist only under `@Profile("dev")`, to drive the script until the engine runs llm nodes.
 - **Compose:** the app container needs `AEP_LLM_A_URL`, `AEP_LLM_B_URL` and `AEP_VLLM_URL` pointing at `http://mocks:8090/llm/...`. The yml defaults target localhost.
+
+P4 (tools / MCP) deviations and assumptions:
+
+- **Credentials:** `ToolCredentialProvider` reads `AEP_TOOL_CRED_<TENANT>_<TOOL>`. Tenant and tool are upper-cased, and every character outside `[A-Z0-9]` becomes `_`. If that variable is unset, it falls back to `aep.tools.dev-credential` (`AEP_TOOL_DEV_CREDENTIAL`, empty by default, in which case no header is sent). The credential is sent only as `Authorization: Bearer` on the MCP call. It never appears in args, node output, audit, logs or prompts, and `ToolsProperties.toString` masks it.
+- **`tool_call_audit` (V4):** has no FKs, matching `llm_call`. There is one row per attempt. Args are stored only as a SHA-256 of key-sorted canonical JSON. `effect_key` is set only for side-effecting tools. An audit write failure is logged and never masks the tool result.
+- **READ_ONLY tools bypass the effect ledger.** Side-effecting tools go through `LedgerSideEffectGuard`. LOOKUP reconcile renders the registry lookup spec against `{args}`, and treats the effect as "found" when the first array field of the lookup result is non-empty. This heuristic is an assumption.
+- **MCP error mapping:**
+  - `-32602`/`-32600` → `VALIDATION_FAILED`.
+  - `-32601` → `TOOL_NOT_FOUND`.
+  - `isError` with `in_progress`, or 409 → `EFFECT_IN_PROGRESS` (retryable).
+  - 429 → `UPSTREAM_RATE_LIMITED`.
+  - Other 4xx → `UPSTREAM_CLIENT_ERROR`.
+  - Anything else → `UPSTREAM_UNAVAILABLE` (retryable).
+- **mocks `crm.delete`:** returns 200 with `deleted:false` when it is repeated (idempotent).
+- **LLM tool round:**
+  - Only READ_ONLY tools may be offered. A side-effecting tool in `tools`, or a model asking for an unlisted tool, → `TOOL_FORBIDDEN`.
+  - `maxToolCalls` defaults to 1 and must be 1–3, otherwise `VALIDATION_FAILED`. A model exceeding it → `TOOL_CALL_LIMIT`.
+  - Tool output goes back to the model as a `role:tool` message `{"untrusted":true,"tool":..,"data":..}`, truncated to 16k chars, behind a system guard message.
+  - Tool names are sent verbatim, dots included. The mocks accept this; real OpenAI-style providers may need name mapping.
+  - Tool calls cost 0 against the budget; budget is charged per LLM turn by the router.
+  - In-round tool calls reuse the node's `callIndex` in the audit. They are READ_ONLY, so they have no ledger key.
+- **Not done here (outside P4 ownership):** a definition-validator rule to reject llm nodes whose `tools` include non-READ_ONLY tools or whose `maxToolCalls` is outside 1–3. Today this is enforced at runtime only. `/v1/tools` relies on the P1 auth filter populating `TenantContext`, and returns 401 when it is absent.
