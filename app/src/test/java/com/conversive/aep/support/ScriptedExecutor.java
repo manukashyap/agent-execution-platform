@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Test-only executor for faked node types, driven by the node config:
- * {@code sleepMs}, {@code failTimes} (retryable failures before succeeding), {@code fatal} (non-retryable
+ * {@code sleepMs} (only on attempts up to {@code sleepAttempts} when set), {@code failTimes} (retryable failures before succeeding), {@code fatal} (non-retryable
  * failure code), {@code output}, {@code costUsd}, {@code tokens}. Records calls and peak concurrency.
  */
 public class ScriptedExecutor implements NodeExecutor {
@@ -53,7 +53,9 @@ public class ScriptedExecutor implements NodeExecutor {
 
     private NodeResult run(NodeContext ctx) {
         JsonNode config = ctx.config();
-        sleep(config.path("sleepMs").asLong(0));
+        if (ctx.attempt() <= config.path("sleepAttempts").asInt(Integer.MAX_VALUE)) {
+            sleep(config.path("sleepMs").asLong(0));
+        }
         if (ctx.attempt() <= config.path("failTimes").asInt(0)) {
             throw new RetryableError("SCRIPTED_RETRYABLE", "scripted failure, attempt " + ctx.attempt(),
                     Duration.ofMillis(10));

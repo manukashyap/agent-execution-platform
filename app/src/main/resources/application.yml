@@ -85,6 +85,12 @@ aep:
     default-tenant-budget-usd: 100
     dry-run-max-cost-usd: 0.50
     fallback-execution-max-cost-usd: 5
+    # releases RESERVED rows whose call died before confirm/cancel
+    reaper:
+      enabled: true
+      interval: 60s
+      max-age: 15m
+      batch-size: 100
   router:
     # cost is USD per 1,000 tokens (prompt + completion); rps = token-bucket capacity and refill per second
     providers:

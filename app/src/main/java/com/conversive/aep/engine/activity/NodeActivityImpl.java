@@ -19,6 +19,7 @@ import com.fasterxml.jackson.databind.node.NullNode;
 import io.temporal.activity.Activity;
 import io.temporal.activity.ActivityExecutionContext;
 import io.temporal.activity.ActivityInfo;
+import io.temporal.client.ActivityNotExistsException;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
@@ -98,8 +99,10 @@ public class NodeActivityImpl implements NodeActivity {
     }
 
     private RuntimeException fail(RunKey key, RuntimeException e) {
-        boolean cancelled = HeartbeatingRunner.isCancellation(e);
-        String code = cancelled ? ErrorCodes.CANCELLED : ErrorCodeOf.code(e);
+        // The server no longer knows this attempt: it timed out, which is a failure and not a cancel.
+        boolean timedOut = e instanceof ActivityNotExistsException;
+        boolean cancelled = HeartbeatingRunner.isCancellation(e) && !timedOut;
+        String code = timedOut ? ErrorCodes.TIMEOUT : cancelled ? ErrorCodes.CANCELLED : ErrorCodeOf.code(e);
         try {
             runs.finished(key, failedStatus(cancelled, code).name(), code, e.getMessage(), clock.instant());
         } catch (RuntimeException dbError) {

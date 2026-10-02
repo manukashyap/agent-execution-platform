@@ -2,6 +2,7 @@ package com.conversive.aep.engine.workflow;
 
 import com.conversive.aep.definition.model.FrozenDefinition.FrozenNode;
 import com.conversive.aep.definition.model.FrozenDefinition.RetryPolicy;
+import com.conversive.aep.engine.activity.CompensationActivity;
 import io.temporal.activity.ActivityCancellationType;
 import io.temporal.activity.ActivityOptions;
 import io.temporal.activity.LocalActivityOptions;
@@ -16,6 +17,9 @@ final class NodeActivityOptions {
 
     /** Default compensation attempts when the node declares no retry policy of its own. */
     static final int COMPENSATION_ATTEMPTS = 6;
+
+    /** Headroom on a compensation attempt for the reconciler's reads and the ledger writes between calls. */
+    static final Duration COMPENSATION_SLACK = Duration.ofSeconds(10);
 
     private static final Duration MIN_INTERVAL = Duration.ofMillis(1);
     private static final Duration MAX_INTERVAL = Duration.ofSeconds(60);
@@ -50,8 +54,11 @@ final class NodeActivityOptions {
                         .setBackoffCoefficient(2.0)
                         .setMaximumInterval(Duration.ofSeconds(30))
                         .build();
+        // One attempt makes up to MAX_RECONCILE_ROUNDS forward re-runs plus the inverse, each bounded by timeoutS.
+        Duration startToClose = Duration.ofSeconds((long) (CompensationActivity.MAX_RECONCILE_ROUNDS + 1)
+                * node.timeoutS()).plus(COMPENSATION_SLACK);
         return ActivityOptions.newBuilder()
-                .setStartToCloseTimeout(Duration.ofSeconds(node.timeoutS()))
+                .setStartToCloseTimeout(startToClose)
                 .setHeartbeatTimeout(HEARTBEAT_TIMEOUT)
                 .setRetryOptions(retry)
                 .setCancellationType(ActivityCancellationType.WAIT_CANCELLATION_COMPLETED)

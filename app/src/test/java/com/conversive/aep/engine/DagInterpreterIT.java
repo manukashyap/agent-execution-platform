@@ -143,6 +143,40 @@ class DagInterpreterIT extends PostgresIntegrationTest {
     }
 
     @Test
+    void anAttemptKilledByStartToCloseLeavesNoRunningRowOnceTheRunIsTerminal() throws Exception {
+        h.publish("""
+                {"workflow_id":"killed","version":1,"nodes":[
+                  {"id":"slow","type":"mcp","timeout_s":1,"retry":{"max_attempts":1},
+                   "config":{"tool":"crm.get","sleepMs":3000}}]}
+                """);
+        ExecutionId id = h.start("killed");
+
+        assertThat(h.await(id).status()).isEqualTo(ExecutionStatus.FAILED);
+        assertThat(h.runs(id)).extracting(NodeRunRecord::nodeId, NodeRunRecord::status, NodeRunRecord::errorCode)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("slow", "FAILED", "TIMEOUT"));
+
+        // The timed-out attempt's thread finishes later; its late write must not resurrect the row.
+        Thread.sleep(3500);
+        assertThat(h.runs(id)).extracting(NodeRunRecord::status).containsExactly("FAILED");
+    }
+
+    @Test
+    void anEarlierAttemptKilledByStartToCloseIsClosedWhenTheRetryStarts() {
+        h.publish("""
+                {"workflow_id":"orphan","version":1,"nodes":[
+                  {"id":"slow","type":"mcp","timeout_s":1,
+                   "retry":{"max_attempts":2,"initial_interval_ms":10,"backoff":"FIXED"},
+                   "config":{"tool":"crm.get","sleepMs":3000,"sleepAttempts":1}}]}
+                """);
+        ExecutionId id = h.start("orphan");
+
+        assertThat(h.await(id).status()).isEqualTo(ExecutionStatus.SUCCEEDED);
+        assertThat(h.runs(id)).extracting(NodeRunRecord::attempt, NodeRunRecord::status)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(1, "FAILED"),
+                        org.assertj.core.groups.Tuple.tuple(2, "SUCCEEDED"));
+    }
+
+    @Test
     void failFastCancelsSiblingsWhileContinueOnlySkipsDependants() {
         h.publish("""
                 {"workflow_id":"ff","version":1,"nodes":[

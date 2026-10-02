@@ -30,8 +30,6 @@ import org.springframework.stereotype.Component;
 @Component
 public class CompensationActivityImpl implements CompensationActivity {
 
-    /** RECONCILE_FORWARD rounds before the outcome is declared unresolvable. */
-    static final int MAX_RECONCILE_ROUNDS = 2;
 
     private static final Logger log = LoggerFactory.getLogger(CompensationActivityImpl.class);
 

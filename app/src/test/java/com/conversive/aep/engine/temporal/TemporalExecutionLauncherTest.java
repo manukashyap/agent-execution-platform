@@ -15,7 +15,9 @@ import com.conversive.aep.common.ErrorCodes;
 import com.conversive.aep.common.ExecutionId;
 import com.conversive.aep.common.RetryableError;
 import com.conversive.aep.common.TenantId;
+import com.conversive.aep.engine.RunAlreadyClosedException;
 import com.conversive.aep.engine.workflow.ExecutionRequest;
+import com.conversive.aep.execution.ExecutionStatus;
 import com.conversive.aep.engine.workflow.WorkflowNames;
 import com.conversive.aep.support.Fixtures;
 import io.temporal.api.common.v1.WorkflowExecution;
@@ -67,15 +69,32 @@ class TemporalExecutionLauncherTest {
     }
 
     @Test
-    void alreadyStartedCountsAsSuccess() {
-        when(client.newUntypedWorkflowStub(eq(WorkflowNames.DAG_INTERPRETER), any(WorkflowOptions.class)))
-                .thenReturn(stub);
-        doThrow(new WorkflowExecutionAlreadyStarted(WorkflowExecution.getDefaultInstance(),
-                WorkflowNames.DAG_INTERPRETER, null)).when(stub).start(any());
+    void alreadyStartedCountsAsSuccessWhileTheRunIsOpen() {
+        alreadyStartedWith(WorkflowExecutionStatus.WORKFLOW_EXECUTION_STATUS_RUNNING);
 
         launcher.start(request());
 
         verify(stub, times(1)).start(any());
+    }
+
+    @Test
+    void alreadyStartedOnAClosedRunReportsItsOutcome() {
+        alreadyStartedWith(WorkflowExecutionStatus.WORKFLOW_EXECUTION_STATUS_TIMED_OUT);
+
+        assertThatThrownBy(() -> launcher.start(request()))
+                .isInstanceOfSatisfying(RunAlreadyClosedException.class,
+                        e -> assertThat(e.outcome()).isEqualTo(ExecutionStatus.TIMED_OUT));
+        verify(stub, times(1)).start(any());
+    }
+
+    private void alreadyStartedWith(WorkflowExecutionStatus status) {
+        when(client.newUntypedWorkflowStub(eq(WorkflowNames.DAG_INTERPRETER), any(WorkflowOptions.class)))
+                .thenReturn(stub);
+        doThrow(new WorkflowExecutionAlreadyStarted(WorkflowExecution.getDefaultInstance(),
+                WorkflowNames.DAG_INTERPRETER, null)).when(stub).start(any());
+        WorkflowExecutionDescription description = description(status);
+        when(client.newUntypedWorkflowStub("exec:t_dev:" + EXEC)).thenReturn(stub);
+        when(stub.describe()).thenReturn(description);
     }
 
     @Test

@@ -147,7 +147,7 @@ public class LedgerRepository {
                 .update() == 1;
     }
 
-    /** The provider refused before doing anything (429): forget the attempt so the retry starts clean. */
+    /** A 429 on the call of the attempt that created the row: nothing can have landed, so the retry starts clean. */
     public boolean release(TenantId tenantId, EffectKey key, int owner) {
         return jdbc.sql("""
                         DELETE FROM side_effect_ledger

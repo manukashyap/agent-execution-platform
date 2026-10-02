@@ -151,7 +151,7 @@ final class ForwardRun {
         String message = messageOf(failure);
         FanOut fanOut = fanOuts.get(call.nodeId());
         if (fanOut == null) {
-            nodeFailed(definition.node(call.nodeId()).orElseThrow(), code, message, false);
+            nodeFailed(definition.node(call.nodeId()).orElseThrow(), code, message, !raisedByActivity(failure));
         } else {
             fanOut.failed(code, message);
             if (!ErrorCodes.CANCELLED.equals(code) && fanOut.node().onFailure() != OnFailure.CONTINUE) {
@@ -223,6 +223,15 @@ final class ForwardRun {
             return ErrorCodes.CANCELLED;
         }
         return ErrorCodes.INTERNAL;
+    }
+
+    /**
+     * The activity's own catch block recorded the failure only when it raised it; a timeout or a dead worker
+     * leaves its node_run row RUNNING for the interpreter to close.
+     */
+    private static boolean raisedByActivity(Throwable failure) {
+        Throwable cause = failure instanceof ActivityFailure a && a.getCause() != null ? a.getCause() : failure;
+        return cause instanceof ApplicationFailure;
     }
 
     private static String messageOf(Throwable failure) {
