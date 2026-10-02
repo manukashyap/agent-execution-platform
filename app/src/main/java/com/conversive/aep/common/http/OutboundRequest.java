@@ -10,7 +10,8 @@ import java.util.Objects;
 /**
  * One outbound HTTP call.
  *
- * @param timeout        whole-call timeout; callers pass {@code node StartToClose - 1s}
+ * @param timeout        hard deadline for the whole call (pool wait, connect, request and the entire response body;
+ *                       the call is cancelled at this point); callers pass {@code node StartToClose - 1s}
  * @param idempotencyKey sent as {@code Idempotency-Key} when non-null
  * @param allowInNonLive set only by the dry-run policy for calls it explicitly permits outside LIVE mode
  */

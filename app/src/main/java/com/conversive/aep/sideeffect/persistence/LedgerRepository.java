@@ -34,6 +34,12 @@ public class LedgerRepository {
             owner_attempt, lease_until, external_ref, response::text AS response
             """;
 
+    private static final String COMMIT = """
+            UPDATE side_effect_ledger
+            SET state = 'COMMITTED', response = CAST(:response AS jsonb), external_ref = :ref, updated_at = :now
+            WHERE tenant_id = :tenant AND effect_key = :key AND state IN ('PENDING', 'UNKNOWN')
+            """;
+
     private final JdbcClient jdbc;
     private final ObjectMapper mapper;
 
@@ -106,14 +112,25 @@ public class LedgerRepository {
                 .update() == 1;
     }
 
-    /** 06 §4.9 step 3: any attempt may commit a PENDING or UNKNOWN row (the result is the same effect). */
+    /**
+     * 06 §4.9 step 3 for an attempt that made the call: only the row's current owner may commit, so an attempt
+     * that outlived its lease cannot commit after another attempt took the row over.
+     */
+    public boolean commit(TenantId tenantId, EffectKey key, int owner, JsonNode response, String externalRef,
+                          Instant now) {
+        return jdbc.sql(COMMIT + " AND owner_attempt = :owner")
+                .param("owner", owner)
+                .param("response", write(response))
+                .param("ref", externalRef)
+                .param("now", ts(now))
+                .param("tenant", tenantId.value())
+                .param("key", key.value())
+                .update() == 1;
+    }
+
+    /** Commit for the reconciler, which found the effect by lookup and owns no attempt: any owner will do. */
     public boolean commit(TenantId tenantId, EffectKey key, JsonNode response, String externalRef, Instant now) {
-        return jdbc.sql("""
-                        UPDATE side_effect_ledger
-                        SET state = 'COMMITTED', response = CAST(:response AS jsonb), external_ref = :ref,
-                            updated_at = :now
-                        WHERE tenant_id = :tenant AND effect_key = :key AND state IN ('PENDING', 'UNKNOWN')
-                        """)
+        return jdbc.sql(COMMIT)
                 .param("response", write(response))
                 .param("ref", externalRef)
                 .param("now", ts(now))

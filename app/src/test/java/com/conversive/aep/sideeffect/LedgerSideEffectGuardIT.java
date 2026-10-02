@@ -169,6 +169,26 @@ class LedgerSideEffectGuardIT extends LedgerTestSupport {
     }
 
     @Test
+    void zombieAttemptCannotCommitAfterATakeover() {
+        EffectSpec zombie = forward(1, IdempotencyMode.NATIVE_KEY, START_TO_CLOSE);
+        EffectSpec taker = forward(2, IdempotencyMode.NATIVE_KEY, START_TO_CLOSE);
+        JsonNode lateResult = mapper.createObjectNode().put("charge_id", "late");
+
+        // Attempt 1's call outlives its lease; attempt 2 takes the row over and its own call is still unresolved.
+        assertThatThrownBy(() -> guard.run(zombie, key -> {
+            clock.advance(Duration.ofSeconds(15));
+            assertThatThrownBy(() -> guard.run(taker, k -> {
+                throw new RetryableError(ErrorCodes.UPSTREAM_TIMEOUT, "timeout");
+            })).isInstanceOf(RetryableError.class);
+            return lateResult;
+        })).isInstanceOf(NonRetryableError.class);
+
+        assertThat(row(zombie)).returns(LedgerState.PENDING, LedgerEntry::state)
+                .returns(2, LedgerEntry::ownerAttempt)
+                .returns(null, LedgerEntry::response);
+    }
+
+    @Test
     void lookupModeCommitsAnEffectFoundByLookupWithoutCallingAgain() {
         EffectSpec attempt1 = spec("crm", Phase.FORWARD, 1, IdempotencyMode.LOOKUP,
                 START_TO_CLOSE);

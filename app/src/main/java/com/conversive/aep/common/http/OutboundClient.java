@@ -6,6 +6,7 @@ import com.conversive.aep.common.RetryableError;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PreDestroy;
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.net.InetAddress;
@@ -22,21 +23,25 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.TreeMap;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.apache.hc.client5.http.DnsResolver;
 import org.apache.hc.client5.http.config.ConnectionConfig;
+import org.apache.hc.client5.http.classic.methods.HttpUriRequestBase;
 import org.apache.hc.client5.http.config.RequestConfig;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuilder;
 import org.apache.hc.client5.http.protocol.HttpClientContext;
-import org.apache.hc.core5.http.ClassicHttpRequest;
 import org.apache.hc.core5.http.ClassicHttpResponse;
 import org.apache.hc.core5.http.ConnectionRequestTimeoutException;
 import org.apache.hc.core5.http.ContentType;
 import org.apache.hc.core5.http.Header;
 import org.apache.hc.core5.http.ParseException;
+import org.apache.hc.core5.http.io.entity.ByteArrayEntity;
 import org.apache.hc.core5.http.io.entity.EntityUtils;
-import org.apache.hc.core5.http.io.support.ClassicRequestBuilder;
 import org.apache.hc.core5.util.Timeout;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -57,6 +62,8 @@ public class OutboundClient {
     private final ObjectMapper mapper;
     private final Clock clock;
     private final Duration connectionRequestTimeout;
+    /** Fires {@code HttpUriRequestBase.cancel()} at each call's deadline; one daemon thread, tasks are tiny. */
+    private final ScheduledThreadPoolExecutor deadlines = newDeadlineScheduler();
     /** Whether the request sent on this thread targets an allow-listed host; the client connects on the caller's thread. */
     private final ThreadLocal<Boolean> allowListed = new ThreadLocal<>();
 
@@ -84,6 +91,22 @@ public class OutboundClient {
         this.connectionRequestTimeout = properties.connectionRequestTimeout();
     }
 
+    private static ScheduledThreadPoolExecutor newDeadlineScheduler() {
+        ScheduledThreadPoolExecutor scheduler = new ScheduledThreadPoolExecutor(1, runnable -> {
+            Thread thread = new Thread(runnable, "outbound-deadline");
+            thread.setDaemon(true);
+            return thread;
+        });
+        scheduler.setRemoveOnCancelPolicy(true);
+        return scheduler;
+    }
+
+    @PreDestroy
+    void close() throws IOException {
+        deadlines.shutdownNow();
+        http.close();
+    }
+
     /** The client's only DNS lookup: resolves once and rejects non-public answers unless the target is allow-listed. */
     private final class ValidatingDnsResolver implements DnsResolver {
         @Override
@@ -104,39 +127,51 @@ public class OutboundClient {
         return classify(request, result);
     }
 
-    private ClassicHttpRequest toHttpRequest(OutboundRequest request) {
-        ClassicRequestBuilder builder = ClassicRequestBuilder.create(request.method())
-                .setUri(request.uri())
-                .addHeader("Accept", "application/json");
+    private HttpUriRequestBase toHttpRequest(OutboundRequest request) {
+        HttpUriRequestBase http = new HttpUriRequestBase(request.method(), request.uri());
+        http.addHeader("Accept", "application/json");
         if (request.body() != null) {
-            builder.setEntity(write(request.body()).getBytes(StandardCharsets.UTF_8), JSON);
+            http.setEntity(new ByteArrayEntity(write(request.body()).getBytes(StandardCharsets.UTF_8), JSON));
         }
-        request.headers().forEach(builder::setHeader);
+        request.headers().forEach(http::setHeader);
         if (request.idempotencyKey() != null) {
-            builder.setHeader(IDEMPOTENCY_KEY, request.idempotencyKey());
+            http.setHeader(IDEMPOTENCY_KEY, request.idempotencyKey());
         }
-        return builder.build();
+        return http;
     }
 
     private RawResponse exchange(OutboundRequest request, boolean exempt) {
         String host = request.uri().getHost();
+        HttpUriRequestBase http = toHttpRequest(request);
         HttpClientContext context = HttpClientContext.create();
         context.setRequestConfig(RequestConfig.custom()
                 .setResponseTimeout(Timeout.of(request.timeout()))
-                .setConnectionRequestTimeout(Timeout.of(connectionRequestTimeout))
+                .setConnectionRequestTimeout(Timeout.of(min(connectionRequestTimeout, request.timeout())))
                 .build());
+        AtomicBoolean deadlineHit = new AtomicBoolean();
+        // responseTimeout is per socket read; this bounds pool wait + connect + the whole body.
+        ScheduledFuture<?> deadline = deadlines.schedule(() -> {
+            deadlineHit.set(true);
+            http.cancel();
+        }, request.timeout().toNanos(), TimeUnit.NANOSECONDS);
         allowListed.set(exempt);
         try {
-            return http.execute(toHttpRequest(request), context, OutboundClient::readResponse);
+            return this.http.execute(http, context, OutboundClient::readResponse);
         } catch (ConnectionRequestTimeoutException e) {
             throw new RetryableError(ErrorCodes.UPSTREAM_NOT_SENT, "no free connection to " + host, null, e);
-        } catch (InterruptedIOException e) {
-            throw new RetryableError(ErrorCodes.UPSTREAM_TIMEOUT, "timeout calling " + host, null, e);
         } catch (IOException e) {
+            if (deadlineHit.get() || e instanceof InterruptedIOException) {
+                throw new RetryableError(ErrorCodes.UPSTREAM_TIMEOUT, "timeout calling " + host, null, e);
+            }
             throw new RetryableError(ErrorCodes.UPSTREAM_IO, "I/O error calling " + host, null, e);
         } finally {
+            deadline.cancel(false);
             allowListed.remove();
         }
+    }
+
+    private static Duration min(Duration a, Duration b) {
+        return a.compareTo(b) <= 0 ? a : b;
     }
 
     private static RawResponse readResponse(ClassicHttpResponse response) throws IOException {

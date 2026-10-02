@@ -150,7 +150,7 @@ public class LedgerSideEffectGuard implements SideEffectGuard {
 
     private JsonNode commit(EffectSpec spec, EffectCall call, JsonNode response) {
         String externalRef = call.externalRef(response).orElse(null);
-        if (ledger.commit(spec.tenantId(), spec.key(), response, externalRef, clock.instant())) {
+        if (ledger.commit(spec.tenantId(), spec.key(), spec.attempt(), response, externalRef, clock.instant())) {
             return response;
         }
         LedgerEntry row = ledger.find(spec.tenantId(), spec.key())
