@@ -71,6 +71,10 @@ class LlmExecutorIT extends PostgresIntegrationTest {
     @BeforeEach
     void reset() {
         WIRE_MOCK.resetAll();
+        // P7: budget rows reference tenant(id), as every real execution's tenant does
+        jdbc.sql("INSERT INTO tenant (id, name) VALUES (:id, :id) ON CONFLICT DO NOTHING")
+                .param("id", TENANT.value())
+                .update();
     }
 
     private static String completions(String provider) {
