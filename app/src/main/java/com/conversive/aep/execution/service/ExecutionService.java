@@ -69,7 +69,8 @@ public class ExecutionService {
     public StartResult start(TenantId tenantId, StartCommand cmd) {
         var existing = executions.findByIdempotencyKey(tenantId, cmd.idempotencyKey());
         if (existing.isPresent()) {
-            return new StartResult(sameWorkflow(existing.get(), cmd), false);
+            ExecutionRecord same = sameWorkflow(existing.get(), cmd);
+            return new StartResult(same.status() == ExecutionStatus.START_FAILED ? relaunch(same, cmd) : same, false);
         }
         if (cmd.mode() == ExecutionMode.REPLAY) {
             throw new NonRetryableError(ErrorCodes.NOT_IMPLEMENTED, "REPLAY mode is not available yet");
@@ -130,6 +131,32 @@ public class ExecutionService {
                     StatusUpdate.failure(clock.instant(), e.code(), e.getMessage()));
             throw e;
         }
+    }
+
+    /**
+     * Idempotent replay of a request whose start failed: re-attempts the Temporal start with the same execution
+     * id. The row goes back to QUEUED first (the workflow only starts from QUEUED) and returns to START_FAILED
+     * when the start fails again.
+     */
+    private ExecutionRecord relaunch(ExecutionRecord row, StartCommand cmd) {
+        StoredDefinition stored = definitions.get(row.tenantId(), row.workflowId(), row.defVersion());
+        FrozenDefinition frozen = freezer.freeze(DefinitionCodec.parse(stored.spec()), stored.sha256(),
+                definitions.ceilings(row.tenantId()));
+        if (!executions.cas(row.tenantId(), row.id(), EnumSet.of(ExecutionStatus.START_FAILED),
+                ExecutionStatus.QUEUED, StatusUpdate.at(clock.instant()))) {
+            return require(row.tenantId(), row.id());
+        }
+        ExecutionRequest request = new ExecutionRequest(row.tenantId(), row.id(), frozen, row.input(), row.mode(),
+                cmd.dryRun(), row.priority(), row.deadlineAt().toEpochMilli());
+        try {
+            launcher.start(request);
+        } catch (RetryableError e) {
+            log.warn("execution {} could not be restarted: {}", row.id(), e.getMessage());
+            executions.cas(row.tenantId(), row.id(), EnumSet.of(ExecutionStatus.QUEUED), ExecutionStatus.START_FAILED,
+                    StatusUpdate.failure(clock.instant(), e.code(), e.getMessage()));
+            throw e;
+        }
+        return require(row.tenantId(), row.id());
     }
 
     private ExecutionRecord sameWorkflow(ExecutionRecord existing, StartCommand cmd) {

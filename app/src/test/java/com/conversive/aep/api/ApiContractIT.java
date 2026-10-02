@@ -139,14 +139,14 @@ class ApiContractIT extends PostgresIntegrationTest {
     }
 
     @Test
-    void cancelOfAFinishedStubRunCancelsTheRowThenConflicts() throws Exception {
+    void cancelOfAFinishedRunConflicts() throws Exception {
         publish();
         String id = executionId(execute("idem-" + UUID.randomUUID()));
         temporal.newUntypedWorkflowStub(DagInterpreterWorkflow.workflowId(tenant.value(), id)).getResult(JsonNode.class);
 
-        call(delete("/v1/executions/" + id), key)
-                .andExpect(status().isAccepted())
-                .andExpect(jsonPath("$.data.status").value("CANCELLED"));
+        call(get("/v1/executions/" + id), key)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("SUCCEEDED"));
         call(delete("/v1/executions/" + id), key)
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.error.code").value("CONFLICT"));
