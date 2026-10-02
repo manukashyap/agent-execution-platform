@@ -94,6 +94,27 @@ class ExecutionRepositoryIT extends PostgresIntegrationTest {
     }
 
     @Test
+    void healingAStartFailedRowClearsTheStaleErrorAndEndTime() {
+        NewExecution e = newExecution("k-" + UUID.randomUUID());
+        repository.insert(e);
+        assertThat(repository.cas(DEV, e.id(), EnumSet.of(ExecutionStatus.QUEUED), ExecutionStatus.START_FAILED,
+                StatusUpdate.failure(NOW.plusSeconds(1), "START_FAILED", "temporal down"))).isTrue();
+
+        assertThat(repository.cas(DEV, e.id(), EnumSet.of(ExecutionStatus.START_FAILED), ExecutionStatus.RUNNING,
+                StatusUpdate.at(NOW.plusSeconds(2)))).isTrue();
+        ExecutionRecord running = repository.findById(DEV, e.id()).orElseThrow();
+        assertThat(running.errorCode()).isNull();
+        assertThat(running.errorMessage()).isNull();
+        assertThat(running.endedAt()).isNull();
+
+        assertThat(repository.cas(DEV, e.id(), EnumSet.of(ExecutionStatus.RUNNING), ExecutionStatus.SUCCEEDED,
+                StatusUpdate.at(NOW.plusSeconds(3)))).isTrue();
+        ExecutionRecord done = repository.findById(DEV, e.id()).orElseThrow();
+        assertThat(done.errorCode()).isNull();
+        assertThat(done.endedAt()).isEqualTo(NOW.plusSeconds(3));
+    }
+
+    @Test
     void nodeRunsAreEmptyForAFreshExecution() {
         NewExecution e = newExecution("k-" + UUID.randomUUID());
         repository.insert(e);

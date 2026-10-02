@@ -93,15 +93,16 @@ public class ExecutionRepository {
                        row_version = row_version + 1,
                        updated_at = :at,
                        started_at = CASE WHEN :to = 'RUNNING' THEN COALESCE(started_at, :at) ELSE started_at END,
-                       ended_at = CASE WHEN :terminal THEN :at ELSE ended_at END,
-                       error_code = COALESCE(:errorCode, error_code),
-                       error_message = COALESCE(:errorMessage, error_message),
+                       ended_at = CASE WHEN :terminal THEN :at WHEN :reopened THEN NULL ELSE ended_at END,
+                       error_code = CASE WHEN :reopened THEN NULL ELSE COALESCE(:errorCode, error_code) END,
+                       error_message = CASE WHEN :reopened THEN NULL ELSE COALESCE(:errorMessage, error_message) END,
                        output = COALESCE(CAST(:output AS jsonb), output)
                  WHERE tenant_id = :tenantId AND id = :id AND status IN (:allowed)
                 """)
                 .param("to", to.name())
                 .param("at", Timestamp.from(update.at()))
                 .param("terminal", to.isTerminal())
+                .param("reopened", to == ExecutionStatus.QUEUED || to == ExecutionStatus.RUNNING)
                 .param("errorCode", update.errorCode())
                 .param("errorMessage", update.errorMessage())
                 .param("output", json(update.output()))
