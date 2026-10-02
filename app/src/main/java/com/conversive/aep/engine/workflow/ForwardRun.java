@@ -177,14 +177,27 @@ final class ForwardRun {
 
     /** @param record write the node_run row here (no activity recorded this failure itself) */
     private void nodeFailed(FrozenNode node, String code, String message, boolean record) {
-        NodeStatus status = ErrorCodes.CANCELLED.equals(code) ? NodeStatus.CANCELLED : NodeStatus.FAILED;
+        NodeStatus status = statusOf(code);
         state.set(node.id(), status);
         if (record) {
             calls.mark(List.of(node.id()), status, code, message);
         }
-        if (status == NodeStatus.FAILED && node.onFailure() != OnFailure.CONTINUE) {
+        if (status == NodeStatus.CANCELLED || node.onFailure() == OnFailure.CONTINUE) {
+            return;
+        }
+        if (status == NodeStatus.NEEDS_ATTENTION) {
+            abortWith(ExecutionStatus.NEEDS_ATTENTION, code, "node " + node.id() + " needs attention: " + message);
+        } else {
             abortWith(ExecutionStatus.FAILED, code, "node " + node.id() + " failed: " + message);
         }
+    }
+
+    /** An effect with an unknown outcome (06 §4.9 NONE mode) is not a plain failure: a human must look. */
+    private static NodeStatus statusOf(String code) {
+        if (ErrorCodes.CANCELLED.equals(code)) {
+            return NodeStatus.CANCELLED;
+        }
+        return ErrorCodes.NEEDS_ATTENTION.equals(code) ? NodeStatus.NEEDS_ATTENTION : NodeStatus.FAILED;
     }
 
     private void checkBudgets() {
