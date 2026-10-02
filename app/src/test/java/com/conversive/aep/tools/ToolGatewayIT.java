@@ -7,7 +7,6 @@ import static com.github.tomakehurst.wiremock.client.WireMock.okJson;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
-import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.options;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -17,42 +16,19 @@ import com.conversive.aep.common.NonRetryableError;
 import com.conversive.aep.common.RetryableError;
 import com.conversive.aep.common.TenantId;
 import com.conversive.aep.common.http.UpstreamClientError;
-import com.conversive.aep.support.PostgresIntegrationTest;
+import com.conversive.aep.support.WireMockToolsIntegrationTest;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.github.tomakehurst.wiremock.WireMockServer;
 import java.time.Duration;
 import java.util.List;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 
 /** {@link ToolGateway} against WireMock emulating the mocks' JSON-RPC {@code /mcp} contract, with Postgres. */
-class ToolGatewayIT extends PostgresIntegrationTest {
+class ToolGatewayIT extends WireMockToolsIntegrationTest {
 
-    static final String TEST_CREDENTIAL = "test-only-tool-credential-7f3a";
     private static final TenantId DEV = TenantId.of("t_dev");
     private static final TenantId OTHER = TenantId.of("t_other");
-    private static final WireMockServer WIRE_MOCK = new WireMockServer(options().dynamicPort());
-
-    static {
-        WIRE_MOCK.start();
-    }
-
-    @DynamicPropertySource
-    static void mcp(DynamicPropertyRegistry registry) {
-        registry.add("aep.tools.mcp-url", () -> WIRE_MOCK.baseUrl() + "/mcp");
-        registry.add("aep.tools.dev-credential", () -> TEST_CREDENTIAL);
-        registry.add("aep.outbound.allow-hosts", () -> "localhost:" + WIRE_MOCK.port());
-    }
-
-    @AfterAll
-    static void stopWireMock() {
-        WIRE_MOCK.stop();
-    }
 
     @Autowired
     private ToolGateway gateway;
@@ -62,21 +38,6 @@ class ToolGatewayIT extends PostgresIntegrationTest {
 
     @Autowired
     private ObjectMapper mapper;
-
-    @BeforeEach
-    void reset() {
-        WIRE_MOCK.resetAll();
-    }
-
-    static String toolResult(String json, boolean isError) {
-        return """
-                {"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"json","json":%s}],"isError":%s}}
-                """.formatted(json, isError);
-    }
-
-    static String rpcError(int code) {
-        return "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":" + code + ",\"message\":\"x\"}}";
-    }
 
     private void stubMcp(String body) {
         WIRE_MOCK.stubFor(post(urlEqualTo("/mcp")).willReturn(okJson(body)));
