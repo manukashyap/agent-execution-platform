@@ -159,6 +159,36 @@ class CompensationReconcilerIT extends LedgerTestSupport {
     }
 
     @Test
+    void lookupForwardThatUpdatedAPreExistingRecordNeedsAttentionInsteadOfBeingCompensated() {
+        EffectSpec forward = forward(1, IdempotencyMode.LOOKUP, START_TO_CLOSE);
+        leavePending(forward);
+        clock.advance(TimingContract.lease(START_TO_CLOSE));
+        JsonNode found = mapper.createObjectNode().put("external_ref", "crm_9").put("created", false);
+
+        CompensationDecision decision = reconciler.decide(TENANT, execution, NODE, 0,
+                Reversibility.COMPENSATABLE, lookupReturning(Optional.of(found)));
+
+        assertThat(decision.kind()).isEqualTo(Kind.NEEDS_ATTENTION);
+        assertThat(row(forward).state()).isEqualTo(LedgerState.COMMITTED);
+    }
+
+    @Test
+    void committedForwardThatCreatedItsRecordIsStillCompensated() {
+        EffectSpec forward = forward(1, IdempotencyMode.LOOKUP, START_TO_CLOSE);
+        guard.run(forward, key -> mapper.createObjectNode().put("external_ref", "crm_9").put("created", true));
+
+        assertThat(decide(Reversibility.COMPENSATABLE).kind()).isEqualTo(Kind.COMPENSATE);
+    }
+
+    @Test
+    void committedForwardThatUpdatedAPreExistingRecordNeedsAttention() {
+        EffectSpec forward = forward(1, IdempotencyMode.LOOKUP, START_TO_CLOSE);
+        guard.run(forward, key -> mapper.createObjectNode().put("external_ref", "crm_9").put("created", false));
+
+        assertThat(decide(Reversibility.COMPENSATABLE).kind()).isEqualTo(Kind.NEEDS_ATTENTION);
+    }
+
+    @Test
     void lookupForwardNotFoundIsSkipped() {
         EffectSpec forward = forward(1, IdempotencyMode.LOOKUP, START_TO_CLOSE);
         leavePending(forward);

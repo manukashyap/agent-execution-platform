@@ -75,8 +75,7 @@ class McpIT extends MockIT {
     }
 
     @Test
-    void crmDeleteRemovesEveryContactWithTheExternalRefAndIsSafeToRepeat() throws Exception {
-        call("crm.upsert", Map.of("external_ref", "d-1", "name", "Ada", "email", "a@x.test"), Map.of());
+    void crmDeleteRemovesTheContactWithTheExternalRefAndIsSafeToRepeat() throws Exception {
         call("crm.upsert", Map.of("external_ref", "d-1", "name", "Ada", "email", "a@x.test"), Map.of());
         call("crm.upsert", Map.of("external_ref", "keep", "name", "Bob", "email", "b@x.test"), Map.of());
 
@@ -87,7 +86,7 @@ class McpIT extends MockIT {
         JsonNode json = deleted.get("content").get(0).get("json");
         assertThat(json.get("external_ref").asText()).isEqualTo("d-1");
         assertThat(json.get("deleted").asBoolean()).isTrue();
-        assertThat(json.get("deleted_count").asInt()).isEqualTo(2);
+        assertThat(json.get("deleted_count").asInt()).isEqualTo(1);
         assertThat(again.get("isError").asBoolean()).isFalse();
         assertThat(again.get("content").get(0).get("json").get("deleted").asBoolean()).isFalse();
         assertThat(call("crm.get", Map.of("external_ref", "d-1"), Map.of()).body()
@@ -95,6 +94,62 @@ class McpIT extends MockIT {
         assertThat(call("crm.get", Map.of("external_ref", "keep"), Map.of()).body()
                 .get("result").get("content").get(0).get("json").get("contacts")).hasSize(1);
         assertThat(call("crm.delete", Map.of(), Map.of()).body().get("error").get("code").asInt()).isEqualTo(-32602);
+    }
+
+    private static final Map<String, Object> ADA = Map.of("external_ref", "u-1", "name", "Ada", "email", "a@x.test");
+
+    private JsonNode crmJson(String tool, Map<String, Object> args, String effectKey) throws Exception {
+        Map<String, String> headers = effectKey == null ? Map.of() : Map.of("Idempotency-Key", effectKey);
+        return call(tool, args, headers).body().get("result").get("content").get(0).get("json");
+    }
+
+    @Test
+    void upsertReportsCreatedForANewContactAndUpdatedForAnExistingOne() throws Exception {
+        JsonNode first = crmJson("crm.upsert", ADA, "k1");
+        JsonNode second = crmJson("crm.upsert", Map.of("external_ref", "u-1", "name", "Grace", "email", "g@x.test"), "k2");
+
+        assertThat(first.get("created").asBoolean()).isTrue();
+        assertThat(first.get("external_ref").asText()).isEqualTo("u-1");
+        assertThat(first.get("effect_key").asText()).isEqualTo("k1");
+        assertThat(second.get("created").asBoolean()).isFalse();
+        assertThat(second.get("contact_id").asText()).isEqualTo(first.get("contact_id").asText());
+        JsonNode contacts = crmJson("crm.get", Map.of("external_ref", "u-1"), null).get("contacts");
+        assertThat(contacts).hasSize(1);
+        assertThat(contacts.get(0).get("name").asText()).isEqualTo("Grace");
+    }
+
+    @Test
+    void replayingAnEffectKeyReturnsTheOriginalOutcomeWithoutAnotherWrite() throws Exception {
+        JsonNode first = crmJson("crm.upsert", ADA, "k1");
+        JsonNode replay = crmJson("crm.upsert", ADA, "k1");
+
+        assertThat(replay).isEqualTo(first);
+        assertThat(replay.get("created").asBoolean()).isTrue();
+    }
+
+    @Test
+    void getScopedByEffectKeyIgnoresAContactThatPredatesTheEffect() throws Exception {
+        crmJson("crm.upsert", ADA, "pre-existing");
+
+        JsonNode beforeMine = crmJson("crm.get", Map.of("external_ref", "u-1", "effect_key", "mine"), null);
+        assertThat(beforeMine.get("contacts")).isEmpty();
+
+        crmJson("crm.upsert", ADA, "mine");
+        JsonNode afterMine = crmJson("crm.get", Map.of("external_ref", "u-1", "effect_key", "mine"), null);
+        assertThat(afterMine.get("contacts")).hasSize(1);
+        assertThat(afterMine.get("contacts").get(0).get("created").asBoolean()).isFalse();
+    }
+
+    @Test
+    void deleteScopedByEffectKeyLeavesAContactItDidNotCreate() throws Exception {
+        crmJson("crm.upsert", ADA, "other");
+
+        JsonNode mismatch = crmJson("crm.delete", Map.of("external_ref", "u-1", "effect_key", "mine"), null);
+        assertThat(mismatch.get("deleted").asBoolean()).isFalse();
+        assertThat(crmJson("crm.get", Map.of("external_ref", "u-1"), null).get("contacts")).hasSize(1);
+
+        JsonNode match = crmJson("crm.delete", Map.of("external_ref", "u-1", "effect_key", "other"), null);
+        assertThat(match.get("deleted").asBoolean()).isTrue();
     }
 
     @Test

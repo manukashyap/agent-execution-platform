@@ -3,13 +3,16 @@ package com.conversive.aep.engine;
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.anyRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.containing;
+import static com.github.tomakehurst.wiremock.client.WireMock.matchingJsonPath;
 import static com.github.tomakehurst.wiremock.client.WireMock.okJson;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.options;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.conversive.aep.common.EffectKey;
 import com.conversive.aep.common.ExecutionId;
+import com.conversive.aep.common.Phase;
 import com.conversive.aep.common.TenantId;
 import com.conversive.aep.definition.DefinitionService;
 import com.conversive.aep.execution.ExecutionStatus;
@@ -21,6 +24,7 @@ import com.conversive.aep.support.TestTenants;
 import com.conversive.aep.support.WireMockToolsIntegrationTest;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.tomakehurst.wiremock.WireMockServer;
+import com.github.tomakehurst.wiremock.stubbing.Scenario;
 import io.temporal.client.WorkflowClient;
 import java.time.Duration;
 import org.junit.jupiter.api.AfterAll;
@@ -111,6 +115,79 @@ class CompensationLookupIT extends PostgresIntegrationTest {
         assertThat(h.await(id).status()).isEqualTo(ExecutionStatus.COMPENSATED);
         assertThat(mcpCalls("crm.get")).isGreaterThanOrEqualTo(1);
         assertThat(mcpCalls("crm.delete")).isEqualTo(1);
+    }
+
+    private static final String UPSERT_THEN_FAIL = """
+            {"workflow_id":"%s","version":1,"nodes":[
+              {"id":"upsert","type":"mcp","timeout_s":2,"retry":{"max_attempts":1},
+               "config":{"tool":"crm.upsert","args":{"external_ref":"lead_9","name":"Ada","email":"a@example.com"}},
+               "compensate":{"type":"mcp","config":{"tool":"crm.delete","args":{"external_ref":"lead_9"}}}},
+              {"id":"boom","type":"http","depends_on":["upsert"],"retry":{"max_attempts":1},
+               "config":{"method":"POST","url":"%s/boom"}}]}
+            """;
+
+    private void upsertReturns(String payload) {
+        WIRE_MOCK.stubFor(post(urlEqualTo("/mcp")).withRequestBody(containing("\"crm.upsert\""))
+                .willReturn(okJson(WireMockToolsIntegrationTest.toolResult(payload, false))));
+        WIRE_MOCK.stubFor(post(urlEqualTo("/boom")).willReturn(aResponse().withStatus(422)));
+    }
+
+    /** H3 scenario B: the upsert updated a contact that predates the run, so compensation must not delete it. */
+    @Test
+    void aLaterFailureDoesNotDeleteAContactTheUpsertOnlyUpdated() {
+        upsertReturns("{\"external_ref\":\"lead_9\",\"created\":false}");
+        h.publish(UPSERT_THEN_FAIL.formatted("keep_existing", WIRE_MOCK.baseUrl()));
+        ExecutionId id = h.start("keep_existing");
+
+        assertThat(h.await(id).status()).isEqualTo(ExecutionStatus.NEEDS_ATTENTION);
+        assertThat(h.row(id).errorMessage()).startsWith("compensation of upsert needs attention");
+        assertThat(mcpCalls("crm.delete")).isZero();
+    }
+
+    /** The created-by-us path still compensates by delete. */
+    @Test
+    void aLaterFailureDeletesAContactTheUpsertCreated() {
+        upsertReturns("{\"external_ref\":\"lead_9\",\"created\":true}");
+        h.publish(UPSERT_THEN_FAIL.formatted("delete_created", WIRE_MOCK.baseUrl()));
+        ExecutionId id = h.start("delete_created");
+
+        assertThat(h.await(id).status()).isEqualTo(ExecutionStatus.COMPENSATED);
+        assertThat(mcpCalls("crm.delete")).isEqualTo(1);
+    }
+
+    /**
+     * H3 scenario A: a contact with the same external_ref predates the run and the upsert is interrupted. The
+     * reconcile lookup must be scoped to this effect's key, so the old contact is not adopted as "our" result.
+     */
+    @Test
+    void anInterruptedUpsertDoesNotAdoptAContactThatPredatesTheEffect() {
+        WIRE_MOCK.stubFor(post(urlEqualTo("/mcp")).withRequestBody(containing("\"crm.get\""))
+                .willReturn(okJson(WireMockToolsIntegrationTest.toolResult(
+                        "{\"contacts\":[{\"external_ref\":\"lead_9\",\"created\":true}]}", false))));
+        WIRE_MOCK.stubFor(post(urlEqualTo("/mcp")).withRequestBody(containing("\"crm.get\""))
+                .withRequestBody(matchingJsonPath("$.params.arguments.effect_key"))
+                .willReturn(okJson(WireMockToolsIntegrationTest.toolResult("{\"contacts\":[]}", false))));
+        WIRE_MOCK.stubFor(post(urlEqualTo("/mcp")).withRequestBody(containing("\"crm.upsert\""))
+                .inScenario("upsert").whenScenarioStateIs(Scenario.STARTED).willSetStateTo("second")
+                .willReturn(okJson(WireMockToolsIntegrationTest.toolResult(
+                        "{\"external_ref\":\"lead_9\",\"created\":false}", false)).withFixedDelay(3000)));
+        WIRE_MOCK.stubFor(post(urlEqualTo("/mcp")).withRequestBody(containing("\"crm.upsert\""))
+                .inScenario("upsert").whenScenarioStateIs("second")
+                .willReturn(okJson(WireMockToolsIntegrationTest.toolResult(
+                        "{\"external_ref\":\"lead_9\",\"created\":false}", false))));
+        h.publish("""
+                {"workflow_id":"no_adopt","version":1,"nodes":[
+                  {"id":"upsert","type":"mcp","timeout_s":2,"retry":{"max_attempts":3,"initial_interval_ms":50},
+                   "config":{"tool":"crm.upsert","args":{"external_ref":"lead_9","name":"Ada","email":"a@example.com"}}}]}
+                """);
+        ExecutionId id = h.start("no_adopt");
+
+        assertThat(h.await(id).status()).isEqualTo(ExecutionStatus.SUCCEEDED);
+        assertThat(mcpCalls("crm.upsert")).isGreaterThanOrEqualTo(2);
+        String effectKey = EffectKey.of(h.tenant(), id, "upsert", Phase.FORWARD, 0).value();
+        assertThat(WIRE_MOCK.findAll(anyRequestedFor(urlEqualTo("/mcp"))).stream()
+                .filter(r -> r.getBodyAsString().contains("\"crm.get\""))
+                .allMatch(r -> r.getBodyAsString().contains("\"effect_key\":\"" + effectKey + "\""))).isTrue();
     }
 
     /**

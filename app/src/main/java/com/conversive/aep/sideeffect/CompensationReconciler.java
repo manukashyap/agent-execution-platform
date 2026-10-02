@@ -117,10 +117,23 @@ public class CompensationReconciler {
 
     private static CompensationDecision executed(Reversibility reversibility, JsonNode response) {
         return switch (reversibility) {
-            case COMPENSATABLE -> new CompensationDecision(Kind.COMPENSATE, response, "forward effect committed");
+            case COMPENSATABLE -> updatedPreExistingState(response)
+                    ? CompensationDecision.of(Kind.NEEDS_ATTENTION, "forward effect updated a record that existed "
+                            + "before it ran (created=false); its prior state cannot be restored, so it is not "
+                            + "compensated")
+                    : new CompensationDecision(Kind.COMPENSATE, response, "forward effect committed");
             case PIVOT -> new CompensationDecision(Kind.PIVOT_EXECUTED, response, "irreversible effect committed");
             case RETRIABLE, READ_ONLY -> CompensationDecision.of(Kind.SKIP, "tool has no compensation");
         };
+    }
+
+    /**
+     * Provider convention: a response with {@code created: false} says the effect modified state that predated it
+     * (an upsert that hit an existing record). Its inverse would destroy data it never made, so a human decides.
+     */
+    private static boolean updatedPreExistingState(JsonNode response) {
+        JsonNode created = response == null ? null : response.get("created");
+        return created != null && created.isBoolean() && !created.asBoolean();
     }
 
     private static RetryableError inProgress(LedgerEntry row, Instant now) {
