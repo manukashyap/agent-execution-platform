@@ -9,8 +9,10 @@
 # (`./gradlew :app:bootRun`, which defaults to dev). Needs curl; jq is used for compact output if present.
 # Env: APP or BASE_URL (app), MOCKS or MOCKS_URL (mocks), RATE, BASELINE_S, SLOW_S, RECOVER_S, POLL_S.
 #
-# Why RATE defaults to 50 req/s: a window counts only with >= 20 samples. While DEGRADED, vLLM gets
-# every 20th request, so recovery needs 20 probes per 10 s window: 20 / (0.05 * 10 s) = 40 req/s.
+# Why RATE defaults to 120 req/s: a window counts only with >= 20 samples. While DEGRADED, vLLM gets
+# every 20th request, so recovery needs 20 probes per 10 s window: 20 / (0.05 * 10 s) = 40 req/s. The curl-per-request driver
+# on macOS delivers only ~35 req/s when asked for 50 (probe windows stayed at 18 samples and vLLM never
+# recovered), so the default asks for 120 and gets ~55 req/s.
 # At 5 req/s DEGRADED is still reached (vLLM takes all traffic while HEALTHY: 50 samples/window), but
 # recovery would never qualify. Use RATE=5 to see only the degradation half.
 #
@@ -20,7 +22,7 @@ set -euo pipefail
 
 APP="${APP:-${BASE_URL:-http://localhost:8000}}"
 MOCKS="${MOCKS:-${MOCKS_URL:-http://localhost:8090}}"
-RATE="${RATE:-50}"
+RATE="${RATE:-120}"
 BASELINE_S="${BASELINE_S:-15}"
 SLOW_S="${SLOW_S:-60}"
 RECOVER_S="${RECOVER_S:-60}"

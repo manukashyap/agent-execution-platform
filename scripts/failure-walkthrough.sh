@@ -89,7 +89,7 @@ start() {
 await_terminal() {
   local id=$1 status=""
   for _ in $(seq 1 150); do
-    status="$(api "$BASE/v1/executions/$id" 2>/dev/null | field status || true)"
+    status="$(api "$BASE/v1/executions/$id" 2>/dev/null | sed -n 's/.*"version":[0-9]*,"status":"\([A-Z_]*\)".*/\1/p' | head -n 1 || true)"
     case "$status" in
       SUCCEEDED|FAILED|CANCELLED|TIMED_OUT|COMPENSATED|COMPENSATION_FAILED|NEEDS_ATTENTION) break ;;
     esac
