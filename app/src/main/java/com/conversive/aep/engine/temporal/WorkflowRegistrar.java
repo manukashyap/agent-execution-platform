@@ -1,18 +1,26 @@
 package com.conversive.aep.engine.temporal;
 
-import com.conversive.aep.engine.workflow.StubDagInterpreterWorkflowImpl;
+import com.conversive.aep.engine.activity.ExecutionStateActivity;
+import com.conversive.aep.engine.activity.NodeActivity;
+import com.conversive.aep.engine.workflow.DagInterpreterWorkflowImpl;
 import io.temporal.worker.Worker;
+import java.util.List;
 import org.springframework.stereotype.Component;
 
 /**
- * Registers workflow implementations on the main worker before it starts polling
- * ({@link TemporalWorkerLifecycle} starts it on ApplicationReadyEvent). P2a swaps the stub for the
- * real interpreter here.
+ * Registers the interpreter and the engine activities on the main worker before it starts polling
+ * ({@link TemporalWorkerLifecycle} starts it on ApplicationReadyEvent).
  */
 @Component
 public class WorkflowRegistrar {
 
-    public WorkflowRegistrar(Worker mainWorker) {
-        mainWorker.registerWorkflowImplementationTypes(StubDagInterpreterWorkflowImpl.class);
+    public WorkflowRegistrar(Worker mainWorker, NodeActivity nodeActivity, ExecutionStateActivity stateActivity) {
+        register(mainWorker, List.of(nodeActivity, stateActivity));
+    }
+
+    /** Also used by tests to register the same implementations on an in-process worker. */
+    public static void register(Worker worker, List<Object> activities) {
+        worker.registerWorkflowImplementationTypes(DagInterpreterWorkflowImpl.class);
+        worker.registerActivitiesImplementations(activities.toArray());
     }
 }
