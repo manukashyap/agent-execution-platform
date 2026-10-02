@@ -309,11 +309,11 @@ Each cut = one README line + its design-doc section, committed as `docs: cut <it
 
 | Phase | Block | h | Status | Gate | Notes |
 |---|---|---|---|---|---|
-| P0 | D1·1 | 1.50 | ☐ | ☐ | |
+| P0 | D1·1 | 1.50 | ✅ | ✅ | 47 tests green; Temporal unknowns 1–5 confirmed, 6 fallback (server + admin-tools) |
 | P1 | D1·2 | 1.00 | ☐ | ☐ | |
 | P2a ★ | D1·3 | 4.00 | ☐ | ☐ | |
 | P2b | D1·4 | 0.75 | ☐ | ☐ Checkpoint A | |
-| Doc skeleton ★ | D1·5 | 0.50 | ☐ | ☐ | |
+| Doc skeleton ★ | D1·5 | 0.50 | ✅ | ✅ | `docs/design.md` drafted (≈3.6 k words, trim ~600 in P10) |
 | P5 ★ | D2·1 | 1.50 | ☐ | ☐ | |
 | P3 ★ | D2·2 | 1.50 | ☐ | ☐ | |
 | P4 | D2·3 | 1.25 | ☐ | ☐ | |
