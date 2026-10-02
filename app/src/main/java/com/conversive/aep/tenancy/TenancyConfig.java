@@ -2,6 +2,7 @@ package com.conversive.aep.tenancy;
 
 import com.conversive.aep.tenancy.persistence.LiveExecutionCounter;
 import com.conversive.aep.tenancy.persistence.TenantLimitsRepository;
+import com.conversive.aep.tenancy.persistence.TenantTierRepository;
 import java.time.Clock;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -18,6 +19,11 @@ public class TenancyConfig {
     @Bean
     TenantRateLimiter tenantRateLimiter() {
         return new TenantRateLimiter(System::nanoTime);
+    }
+
+    @Bean
+    TemporalPriorityPolicy temporalPriorityPolicy(TenantTierRepository tiers, TenancyProperties props) {
+        return new TemporalPriorityPolicy(new CachedTenantTiers(tiers, props.limitsRefresh(), System::nanoTime));
     }
 
     /** Supersedes the P1 {@link AllowAllAdmissionControl}. */
