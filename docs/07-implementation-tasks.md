@@ -38,8 +38,8 @@
 | **C. Side effects** | `sideeffect`, `tools` (registry) | P5 | ✅ |
 | **D. AI & tools** | `router`, `tools` (gateway), `nodes` (llm, mcp) | P3, P4 | router degradation ✅ · AI tool round cut-list #3 |
 | **E. Dry-run** | `dryrun` | P6 | ✅ |
-| **F. Tenancy & cost** | `tenancy`, `cost` | P7 | cut-list #2 |  | 🟡 | 🟡 | T7.1–T7.3 green (293 tests): token bucket + soft cap 429s, V5 TCC budgets (50→10 exact), Temporal priority + fairness key; engine-level forEach budget test waits on P2a |
-| **G. Observability** | `observability`, `/trace` | P8 | cut-list #1 |  | 🟡 | 🟡 | T8.1/T8.2 green (306 tests): AepMetrics (9 PDF + 3 extra, no `tenant_id`), queue_depth gauge, `/trace` + `docs/samples/trace-sample.json`; engine call sites wired after P2a |
+| **F. Tenancy & cost** | `tenancy`, `cost` | P7 | cut-list #2 |  | ✅ | ✅ | T7.1–T7.3 green (293 tests): token bucket + soft cap 429s, V5 TCC budgets (50→10 exact), Temporal priority + fairness key; engine forEach cap covered by BudgetCapIT |
+| **G. Observability** | `observability`, `/trace` | P8 | cut-list #1 |  | ✅ | ✅ | T8.1/T8.2 green (306 tests): AepMetrics (9 PDF + 3 extra, no `tenant_id`), queue_depth gauge, `/trace` + `docs/samples/trace-sample.json`; engine call sites wired |
 | **H. Proof & docs** | `loadtest/`, `scripts/`, `docs/` | D1·5, P9, P10 + one demo script per phase | load numbers + design PDF ✅ |
 
 ### Dependency graph
@@ -311,8 +311,8 @@ Each cut = one README line + its design-doc section, committed as `docs: cut <it
 |---|---|---|---|---|---|
 | P0 | D1·1 | 1.50 | ✅ | ✅ | 47 tests green; Temporal unknowns 1–5 confirmed, 6 fallback (server + admin-tools) |
 | P1 | D1·2 | 1.00 | ✅ | ✅ | T1.1–T1.3 green (149 tests); PDF example 201→202→stub SUCCEEDED via `happy-path.sh`; `GET /v1/tools` moved to P4 |
-| P2a ★ | D1·3 | 4.00 | ☐ | ☐ | |
-| P2b | D1·4 | 0.75 | ☐ | ☐ Checkpoint A | |
+| P2a ★ | D1·3 | 4.00 | ✅ | ✅ | T2a.1–T2a.7 green (335 tests): 10 DagInterpreterIT scenarios, CAS race, http mapping; `happy-path.sh` green; engine metrics wired |
+| P2b | D1·4 | 0.75 | ✅ | ✅ Checkpoint A pending review | SagaIT: exactly one refund, in-flight sibling, terminal CAS kept, refund-fails → COMPENSATION_FAILED; `saga-charge-then-send.sh` |
 | Doc skeleton ★ | D1·5 | 0.50 | ✅ | ✅ | `docs/design.md` drafted (≈3.6 k words, trim ~600 in P10) |
 | P5 ★ | D2·1 | 1.50 | 🟡 | ☐ | T5.1/T5.2/T5.4 guard-level + mocks T5.3 done (ledger ITs green); engine-level §9 tests + walkthrough wait on P2a |
 | P3 ★ | D2·2 | 1.50 | 🟡 | ☐ | T3.1–T3.4 green (72 router tests + LlmExecutorIT); `vllm-degradation.sh` written, not yet run end-to-end |
