@@ -170,6 +170,15 @@ class CompensationReconcilerIT extends LedgerTestSupport {
         assertThat(decision.kind()).isEqualTo(Kind.SKIP);
     }
 
+    @Test
+    void lookupForwardWithoutALookupIsReconciledNotSkipped() {
+        EffectSpec forward = forward(1, IdempotencyMode.LOOKUP, START_TO_CLOSE);
+        leavePending(forward);
+        clock.advance(TimingContract.lease(START_TO_CLOSE));
+
+        assertThat(decide(Reversibility.COMPENSATABLE).kind()).isEqualTo(Kind.RECONCILE_FORWARD);
+    }
+
     private CompensationDecision decide(Reversibility reversibility) {
         return reconciler.decide(TENANT, execution, NODE, 0, reversibility);
     }

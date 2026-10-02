@@ -36,16 +36,17 @@ public class CompensationReconciler {
         this.clock = clock;
     }
 
-    /** As {@link #decide(TenantId, ExecutionId, String, int, Reversibility, EffectCall)} without a lookup. */
+    /**
+     * As {@link #decide(TenantId, ExecutionId, String, int, Reversibility, EffectCall)} without a lookup: an
+     * unresolved LOOKUP row yields {@code RECONCILE_FORWARD}, never a SKIP without evidence.
+     */
     public CompensationDecision decide(TenantId tenantId, ExecutionId executionId, String nodeId, int callIndex,
                                        Reversibility forwardReversibility) {
-        return decide(tenantId, executionId, nodeId, callIndex, forwardReversibility, key -> {
-            throw new IllegalStateException("the reconciler never invokes the forward call");
-        });
+        return decide(tenantId, executionId, nodeId, callIndex, forwardReversibility, null);
     }
 
     /**
-     * @param forward only its {@link EffectCall#lookup()} and {@link EffectCall#externalRef} are used, for a
+     * @param forward null when no lookup is available; otherwise only its {@link EffectCall#lookup()} and {@link EffectCall#externalRef} are used, for a
      *                LOOKUP-mode forward with an unresolved outcome; {@code invoke} is never called
      * @throws RetryableError {@code EFFECT_IN_PROGRESS} with the remaining lease while a forward attempt owns it
      */
@@ -99,6 +100,10 @@ public class CompensationReconciler {
 
     private Optional<CompensationDecision> lookup(LedgerEntry row, Reversibility reversibility, EffectCall forward,
                                                   Instant now) {
+        if (forward == null) {
+            return Optional.of(CompensationDecision.of(Kind.RECONCILE_FORWARD,
+                    "forward outcome unknown and no lookup available; re-run it to learn the result"));
+        }
         Optional<JsonNode> found = forward.lookup();
         if (found.isEmpty()) {
             return Optional.of(CompensationDecision.of(Kind.SKIP, "lookup found no forward effect"));

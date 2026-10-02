@@ -9,10 +9,12 @@ import com.conversive.aep.engine.persistence.NodeRunRepository;
 import com.conversive.aep.engine.persistence.NodeRunRepository.RunKey;
 import com.conversive.aep.engine.workflow.NodeStatus;
 import com.conversive.aep.nodes.ExecutorRegistry;
+import com.conversive.aep.nodes.ForwardLookup;
 import com.conversive.aep.nodes.NodeContext;
 import com.conversive.aep.sideeffect.CompensationDecision;
 import com.conversive.aep.sideeffect.CompensationDecision.Kind;
 import com.conversive.aep.sideeffect.CompensationReconciler;
+import com.conversive.aep.sideeffect.EffectCall;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.NullNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -22,6 +24,7 @@ import io.temporal.activity.ActivityInfo;
 import io.temporal.failure.ApplicationFailure;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -81,8 +84,7 @@ public class CompensationActivityImpl implements CompensationActivity {
     private CompensationOutcome decideAndRun(CompensationTask task, int attempt, ActivityExecutionContext activity) {
         NodeTask fwd = task.forward();
         for (int round = 0; round <= MAX_RECONCILE_ROUNDS; round++) {
-            CompensationDecision decision = reconciler.decide(fwd.tenantId(), fwd.executionId(), fwd.nodeId(),
-                    fwd.callIndex(), reversibility(task));
+            CompensationDecision decision = decide(task, attempt);
             if (decision.kind() == Kind.COMPENSATE) {
                 runInverse(task, attempt, decision.forwardResponse(), activity);
                 return new CompensationOutcome(Result.COMPENSATED, decision.reason());
@@ -96,6 +98,29 @@ public class CompensationActivityImpl implements CompensationActivity {
         }
         return new CompensationOutcome(Result.NEEDS_ATTENTION,
                 "forward outcome still unknown after " + MAX_RECONCILE_ROUNDS + " reconcile rounds");
+    }
+
+    /** Uses the forward executor's own lookup when it has one (LOOKUP tools), so PENDING/UNKNOWN rows are resolved. */
+    private CompensationDecision decide(CompensationTask task, int attempt) {
+        NodeTask fwd = task.forward();
+        NodeContext ctx = NodeActivityImpl.context(fwd, attempt, inputs.assemble(fwd));
+        Reversibility reversibility = reversibility(task);
+        if (!(executors.resolve(ctx) instanceof ForwardLookup lookup)) {
+            return reconciler.decide(fwd.tenantId(), fwd.executionId(), fwd.nodeId(), fwd.callIndex(), reversibility);
+        }
+        EffectCall call = new EffectCall() {
+            @Override
+            public JsonNode invoke(String idempotencyKey) {
+                throw new IllegalStateException("the reconciler never invokes the forward call");
+            }
+
+            @Override
+            public Optional<JsonNode> lookup() {
+                return lookup.lookupForward(ctx);
+            }
+        };
+        return reconciler.decide(fwd.tenantId(), fwd.executionId(), fwd.nodeId(), fwd.callIndex(), reversibility,
+                call);
     }
 
     private static Result resultOf(Kind kind) {

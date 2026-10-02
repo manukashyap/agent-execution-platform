@@ -83,6 +83,14 @@ public class McpToolGateway implements ToolGateway {
         }
     }
 
+    @Override
+    public Optional<JsonNode> lookup(ToolInvocation inv) {
+        ToolDefinition tool = access.authorize(inv.tenantId(), inv.toolName());
+        validator.validate(tool, inv.args());
+        Duration stc = inv.startToCloseOr(tool.timeout());
+        return new GuardedCall(tool, inv, TimingContract.httpTimeout(stc)).lookup();
+    }
+
     private JsonNode direct(ToolDefinition tool, ToolInvocation inv, Duration stc) {
         try {
             return call(tool.name(), inv, inv.args(), null, TimingContract.httpTimeout(stc));
