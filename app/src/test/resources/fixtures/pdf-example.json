@@ -1,0 +1,35 @@
+{
+  "workflow_id": "lead_enrichment",
+  "version": 1,
+  "nodes": [
+    {
+      "id": "fetch_leads",
+      "type": "http",
+      "config": {
+        "url": "https://api.example.com/leads",
+        "method": "GET"
+      }
+    },
+    {
+      "id": "classify_leads",
+      "type": "llm",
+      "config": {
+        "prompt": "Classify each lead as hot, warm or cold"
+      }
+    },
+    {
+      "id": "update_crm",
+      "type": "mcp",
+      "config": {
+        "tool": "crm.upsert"
+      }
+    },
+    {
+      "id": "send_message",
+      "type": "mcp",
+      "config": {
+        "tool": "messaging.send"
+      }
+    }
+  ]
+}

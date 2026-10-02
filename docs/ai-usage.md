@@ -100,3 +100,19 @@ P3 (router) deviations and assumptions:
 - **Recovery needs ≥ 40 req/s total:** recovery requires 3 windows with ≥ 20 samples each. While DEGRADED, vLLM gets only the 5 % probe share, so total traffic must be at least 20 / (0.05 × 10 s) = 40 req/s. `scripts/vllm-degradation.sh` therefore defaults to 50 req/s, not 5.
 - **Debug endpoint:** `/internal/router/complete` and `/internal/router/state` exist only under `@Profile("dev")`, to drive the script until the engine runs llm nodes.
 - **Compose:** the app container needs `AEP_LLM_A_URL`, `AEP_LLM_B_URL` and `AEP_VLLM_URL` pointing at `http://mocks:8090/llm/...`. The yml defaults target localhost.
+P1 deviations from docs/06 and docs/07:
+
+- **PDF example fixture:** `fixtures/pdf-example.json` is a reconstruction of the PDF §4 example; it is posted unchanged in the contract tests.
+- **Definition model additions:** optional `max_parallel` and `schedule_to_close_s` fields, `ToolInfo.compensation`, and OR semantics for `NodeTraits`.
+- **New error codes:** `VERSION_EXISTS` (409, a re-publish with a different body) and `NOT_IMPLEMENTED` (501, for `/preview`, `/trace` and REPLAY mode).
+- **Package placement:**
+  - `DryRunOptions` stays in `nodes`; ArchUnit's determinism rule allows it explicitly.
+  - `ExecutionService` lives in `execution.service`, because `execution` is a pure contract package.
+- **ApiKeyRepository.findActive:** looks up by `key_hash` and is the one query not filtered on tenant_id. The tenant is unknown until the key resolves.
+- **Error handling:** the global `@RestControllerAdvice` also shapes errors from P3's `/internal/router` controller.
+- **Per-test tenants:** API ITs create random tenants (`TestTenants`), so the shared container accumulates tenants. `CoreSchemaIT` now asserts that the seeds are *contained* rather than an exact list.
+- **GET /v1/tools** (06 §4.2) is not implemented in P1.
+- **Stub workflow:** `StubDagInterpreterWorkflowImpl` does not write DB status, so GET shows QUEUED until P2a.
+- **Cancel:** describes the run first and only sends a cancel when the run is RUNNING. If there is no open run, the row is CAS'd to CANCELLED directly.
+- **Start retries:** 3 inline attempts with linear backoff (`aep.engine.launcher.*`). After that the row becomes START_FAILED and the API returns 503 with Retry-After.
+- **Open:** a replay of an Idempotency-Key whose execution is START_FAILED returns that dead execution id. If Temporal actually started but the client saw a failure, the row says START_FAILED while the run exists; reconciliation is left to a later phase.

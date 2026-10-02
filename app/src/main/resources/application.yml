@@ -43,6 +43,26 @@ aep:
     connect-timeout: 2s
     allow-hosts: ${AEP_OUTBOUND_ALLOW_HOSTS:localhost:8090,mocks:8090}
     self-hosts: ${AEP_OUTBOUND_SELF_HOSTS:localhost:8000,app:8000}
+  definition:
+    max-nodes: 50
+    max-width: 100
+    min-timeout-s: 1
+    max-timeout-s: 300
+    max-retry-attempts: 5
+    lease-grace-s: 5
+    default-timeout-s: 30
+    default-retry-attempts: 3
+    default-initial-interval-ms: 1000
+    default-max-parallel: 16
+    default-for-each-concurrency: 16
+  engine:
+    launcher:
+      start-attempts: 3
+      start-backoff: 200ms
+      retry-after: 5s
+      run-timeout-slack: 1h
+  api:
+    start-failed-retry-after-s: 5
   tenancy:
     dev:
       dev-api-key: ${AEP_DEV_API_KEY:}

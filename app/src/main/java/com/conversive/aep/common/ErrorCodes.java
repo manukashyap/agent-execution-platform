@@ -35,6 +35,8 @@ public final class ErrorCodes {
     public static final String NO_PROVIDER_AVAILABLE = "NO_PROVIDER_AVAILABLE";
     public static final String LLM_UNAVAILABLE = "LLM_UNAVAILABLE";
     public static final String INTERNAL = "INTERNAL";
+    public static final String VERSION_EXISTS = "VERSION_EXISTS";
+    public static final String NOT_IMPLEMENTED = "NOT_IMPLEMENTED";
 
     private ErrorCodes() {
     }
