@@ -23,6 +23,7 @@ temporal-testing = { module = "io.temporal:temporal-testing", version.ref = "tem
 json-schema-validator = { module = "com.networknt:json-schema-validator", version.ref = "json-schema-validator" }
 testcontainers-junit = { module = "org.testcontainers:junit-jupiter" }
 testcontainers-postgresql = { module = "org.testcontainers:postgresql" }
+httpclient5 = { module = "org.apache.httpcomponents.client5:httpclient5" }
 wiremock = { module = "org.wiremock:wiremock-standalone", version.ref = "wiremock" }
 archunit = { module = "com.tngtech.archunit:archunit-junit5", version.ref = "archunit" }
 junit-launcher = { module = "org.junit.platform:junit-platform-launcher" }

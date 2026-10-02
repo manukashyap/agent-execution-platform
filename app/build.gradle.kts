@@ -14,6 +14,7 @@ dependencies {
     implementation(libs.micrometer.prometheus)
     implementation(libs.temporal.sdk)
     implementation(libs.json.schema.validator)
+    implementation(libs.httpclient5)
     runtimeOnly(libs.postgresql)
     developmentOnly(libs.spring.boot.docker.compose)
 

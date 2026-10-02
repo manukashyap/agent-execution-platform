@@ -3,7 +3,6 @@ package com.conversive.aep.common.http;
 import com.conversive.aep.common.ErrorCodes;
 import com.conversive.aep.common.ExecutionMode;
 import com.conversive.aep.common.NonRetryableError;
-import com.conversive.aep.common.RetryableError;
 import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.URI;
@@ -13,20 +12,36 @@ import java.util.Locale;
 
 /**
  * SSRF and mode-aware egress rules for {@link OutboundClient}. Outside {@code LIVE} a request goes out only when
- * the dry-run policy allowed it (request flag or {@link NonLiveEgress} permit), allow-listed hosts included. The address check resolves the host
- * before the call; DNS rebinding between check and connect is an accepted prototype gap.
+ * the dry-run policy allowed it (request flag or {@link NonLiveEgress} permit), allow-listed hosts included.
+ * {@link #check} judges the request; the addresses are validated by {@link #resolve}, which the HTTP client calls
+ * as its only DNS lookup, so the connection uses exactly the addresses that were validated (no rebinding window).
  */
 public final class EgressPolicy {
 
-    private final List<String> allowHosts;
-    private final List<String> selfHosts;
-
-    public EgressPolicy(OutboundProperties properties) {
-        this.allowHosts = normalize(properties.allowHosts());
-        this.selfHosts = normalize(properties.selfHosts());
+    /** Name lookup, replaceable in tests. */
+    @FunctionalInterface
+    public interface Resolver {
+        InetAddress[] resolve(String host) throws UnknownHostException;
     }
 
-    public void check(URI uri, ExecutionMode mode, boolean allowInNonLive) {
+    public static final Resolver SYSTEM_RESOLVER = InetAddress::getAllByName;
+
+    private final List<String> allowHosts;
+    private final List<String> selfHosts;
+    private final Resolver resolver;
+
+    public EgressPolicy(OutboundProperties properties) {
+        this(properties, SYSTEM_RESOLVER);
+    }
+
+    public EgressPolicy(OutboundProperties properties, Resolver resolver) {
+        this.allowHosts = normalize(properties.allowHosts());
+        this.selfHosts = normalize(properties.selfHosts());
+        this.resolver = resolver;
+    }
+
+    /** @return whether the target is allow-listed, i.e. exempt from the address check in {@link #resolve} */
+    public boolean check(URI uri, ExecutionMode mode, boolean allowInNonLive) {
         String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
         if (!scheme.equals("http") && !scheme.equals("https")) {
             throw denied("scheme not allowed: " + scheme);
@@ -41,24 +56,23 @@ public final class EgressPolicy {
         if (mode != ExecutionMode.LIVE && !allowInNonLive) {
             throw denied("egress not allowed by the dry-run policy in " + mode + " mode: " + host);
         }
-        boolean allowListed = matches(allowHosts, uri);
-        if (!allowListed) {
-            requirePublicAddress(host);
-        }
+        return matches(allowHosts, uri);
     }
 
-    private static void requirePublicAddress(String host) {
-        InetAddress[] addresses;
-        try {
-            addresses = InetAddress.getAllByName(host);
-        } catch (UnknownHostException e) {
-            throw new RetryableError(ErrorCodes.UPSTREAM_IO, "cannot resolve host: " + host, null, e);
-        }
-        for (InetAddress address : addresses) {
-            if (isInternal(address)) {
-                throw denied("host resolves to a non-public address: " + host);
+    /**
+     * Resolves {@code host} once and returns every address, which the caller must connect to and no others. Unless
+     * the target is allow-listed, one non-public address among them denies the whole host.
+     */
+    public InetAddress[] resolve(String host, boolean allowListed) throws UnknownHostException {
+        InetAddress[] addresses = resolver.resolve(host);
+        if (!allowListed) {
+            for (InetAddress address : addresses) {
+                if (isInternal(address)) {
+                    throw denied("host resolves to a non-public address: " + host);
+                }
             }
         }
+        return addresses;
     }
 
     static boolean isInternal(InetAddress a) {
