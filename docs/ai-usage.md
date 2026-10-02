@@ -119,7 +119,7 @@ P1 deviations from docs/06 and docs/07:
 
 P4 (tools / MCP) deviations and assumptions:
 
-- **Credentials:** `ToolCredentialProvider` reads `AEP_TOOL_CRED_<TENANT>_<TOOL>`. Tenant and tool are upper-cased, and every character outside `[A-Z0-9]` becomes `_`. If that variable is unset, it falls back to `aep.tools.dev-credential` (`AEP_TOOL_DEV_CREDENTIAL`, empty by default, in which case no header is sent). The credential is sent only as `Authorization: Bearer` on the MCP call. It never appears in args, node output, audit, logs or prompts, and `ToolsProperties.toString` masks it.
+- **Credentials:** `ToolCredentialProvider` reads `AEP_TOOL_CRED_<HEX(tenant)>_<HEX(tool)>` (upper-case hex of the UTF-8 bytes; changed by review finding M5, because the earlier `[A-Z0-9_]` folding let distinct tenant/tool pairs map to the same variable). The dev fallback below applies only under the `dev` profile. If that variable is unset, it falls back to `aep.tools.dev-credential` (`AEP_TOOL_DEV_CREDENTIAL`, empty by default, in which case no header is sent). The credential is sent only as `Authorization: Bearer` on the MCP call. It never appears in args, node output, audit, logs or prompts, and `ToolsProperties.toString` masks it.
 - **`tool_call_audit` (V4):** has no FKs, matching `llm_call`. There is one row per attempt. Args are stored only as a SHA-256 of key-sorted canonical JSON. `effect_key` is set only for side-effecting tools. An audit write failure is logged and never masks the tool result.
 - **READ_ONLY tools bypass the effect ledger.** Side-effecting tools go through `LedgerSideEffectGuard`. LOOKUP reconcile renders the registry lookup spec against `{args}`, and treats the effect as "found" when the first array field of the lookup result is non-empty. This heuristic is an assumption.
 - **MCP error mapping:**
@@ -244,3 +244,18 @@ P8 (observability, T8.1/T8.2) deviations and assumptions:
 
 - **Override, egress pinning:** `OutboundClient` moved from `java.net.http.HttpClient` (no resolver hook) to Apache HttpClient 5 (Spring-managed version) with a custom `DnsResolver`. `EgressPolicy.check` no longer resolves; `EgressPolicy.resolve` is the client's only lookup and denies the host if any answer is non-public, so the connection uses exactly the validated addresses while Host/SNI keep the original name. Allow-listed `host[:port]` targets (compose `mocks`) skip the address check, decided per request via a thread-local because the client connects on the caller's thread. Redirects stay disabled; the NonLiveEgress lock is untouched. This closes the "SSRF / DNS rebinding gap" noted above.
 - **vllm-degradation default RATE 120 to 40, driver rewritten:** the earlier fix (ask for 120, get ~55) only hid a slow driver. It now sends `RATE * 0.25` requests per tick in one `curl --parallel` process on absolute perl-timed deadlines and measures delivered req/s from completed requests. Measured at the default 40 req/s: delivered 40.0-42 req/s, DEGRADED about 21 s after the 3 s latency change, HEALTHY about 41 s after restore (probe windows hold 17-20 samples, so recovery works but with little headroom; no router config changed).
+
+### High/medium review fixes (2026-10-02)
+
+One commit per finding from the final Opus review (findings H1-H3, M1-M7). The suggested fix was taken in each case.
+
+- **H2:** a pivot whose reconcile or compensation fails stops the saga walk; the run ends NEEDS_ATTENTION.
+- **H3 (+L3):** LOOKUP reconcile is scoped to the execution through `{{effect_key}}` in the lookup template scope (V6 updates the seeded `crm.get` lookup; its output is `{contacts:[...]}`). The mock CRM upsert is a real upsert: it reports `created`, replays by key, and tags records with the effect key. A forward with `created:false` is never compensated and ends that step NEEDS_ATTENTION. **Assumption:** real LOOKUP providers report `created` the same way.
+- **H1:** outbound pool 400 total / 200 per route (was 25 / 5). A pool-wait timeout is retryable `UPSTREAM_NOT_SENT`; the guard releases a row this attempt created, otherwise it expires the lease.
+- **M1:** `OutboundRequest.timeout` is a hard deadline for the whole call, enforced by a scheduler that cancels the request (no longer a per-read timeout). `LedgerRepository.commit` requires `owner_attempt`, so a zombie attempt cannot commit after a takeover.
+- **M2:** response bodies are capped at 10 MiB (Content-Length check plus a counted streaming read, because `EntityUtils.toByteArray(entity, max)` does not throw). Over the cap is non-retryable `RESPONSE_TOO_LARGE`; a guarded effect goes UNKNOWN (never FAILED), counted by `side_effect_unknown`.
+- **M4:** `lease_until` is `now() + interval` and liveness is judged against `now()` read with the row (`LedgerEntry.dbNow`, `leaseLive()`, `leaseRemaining()`). `CompensationReconciler` uses `leaseRemaining()` for its `EFFECT_IN_PROGRESS` delay. A provider 409 now waits the full lease rather than the remaining lease (an overestimate, never early).
+- **M3:** validator rules `SCHEDULE_TO_CLOSE_TOO_SHORT` (below `TimingContract.minScheduleToClose`) and `SIDE_EFFECT_NEEDS_THREE_ATTEMPTS`.
+- **M5:** collision-free hex credential names; the dev credential fallback is used only under the `dev` profile.
+- **M6:** the state activity retries for up to 7 days; `ExecutionReconciler` closes stranded live rows (`ENGINE_RUN_CLOSED`, `ENGINE_RUN_MISSING`).
+- **M7:** `loadtest/RESULTS.md` and design §6 now give the measurement window for each figure and the ScheduleToClose failure mechanism.

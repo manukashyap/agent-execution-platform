@@ -317,9 +317,9 @@ Each cut = one README line + its design-doc section, committed as `docs: cut <it
 | P5 ★ | D2·1 | 1.50 | ✅ | ✅ | `SideEffectEngineIT` (06 §4.9 tests 1/2/3/5; 4 in `SagaIT`); `failure-walkthrough.sh` 5/5 OK; 380 tests green. 5× flake run pending (P9 agent) |
 | P3 ★ | D2·2 | 1.50 | ✅ | ✅ | `vllm-degradation.sh` green at default RATE 40 (≈40–42 req/s delivered): DEGRADED ≈21 s after +3 s latency, HEALTHY ≈41 s after restore |
 | P4 | D2·3 | 1.25 | ✅ | ✅ | T4.1–T4.5 green (200 tests); gateway + `mcp` node + LLM tool round (READ_ONLY, ≤3 calls, untrusted tool output); `/v1/tools` behind auth |
-| P6 ★ | D2·4 | 0.75 | ☐ | ☐ Checkpoint B | |
-| P7 | D2·5 | 0.75 | ☐ | ☐ | |
-| P8 | D2·6 | 0.50 | ☐ | ☐ | |
+| P6 ★ | D2·4 | 0.75 | ✅ | ✅ Checkpoint B | Dry-run with preview merged (Checkpoint A fixes included); see docs/ai-usage.md P6 |
+| P7 | D2·5 | 0.75 | ✅ | ✅ | Tenancy admission + TCC budgets merged; budget-reservation reaper added at Checkpoint A |
+| P8 | D2·6 | 0.50 | ✅ | ✅ | Observability merged: metrics + `/trace`; engine seams closed with P2a |
 | P9 ★ | D2·7 | 1.00 | ✅ | ✅ | `loadtest/run.sh` + `capture.sh`; RESULTS.md: ≈22 exec/s sustained (M4 laptop), first bottleneck Temporal + its Postgres; SideEffectEngineIT 5/5 flake runs |
 | P10 ★ | D2·8 | 1.00 | ✅ | ✅ Release DoD | design.pdf 5 pages (≈3.2 k words, 13 sections); architecture.svg/png; README; WorkflowReplayIT; fresh-clone release check ✅ (scripts mocks-URL fix) |
 | **Total** | | **16.00** | | | |

@@ -49,7 +49,7 @@ export JAVA_HOME=<a JDK 21>
 
 - `bootRun` defaults to the Spring profile `dev` (override with `SPRING_PROFILES_ACTIVE`) and runs from the repo root.
 - `spring-boot-docker-compose` starts `compose.yml` with the `lite` profile automatically (`lifecycle-management: start-only`, so containers keep running when the app stops). That brings up Postgres, the Temporal dev server and the mocks. The mocks can also be run from source: `./gradlew :mocks:bootRun`.
-- Flyway migrates the schema (`V1` to `V5`) on startup. The worker runs inside the app (`aep.temporal.start-worker`).
+- Flyway migrates the schema (`V1` to `V6`) on startup. The worker runs inside the app (`aep.temporal.start-worker`).
 - If several checkouts share one Temporal server, give each its own queue (`AEP_TEMPORAL_TASK_QUEUE=<name>`, default `aep-main`), otherwise another instance's worker can pick up your activities.
 
 ### How to get an API key
@@ -60,7 +60,7 @@ There is no key-issuing endpoint. Keys are stored only as SHA-256 hashes in `api
 curl -H "Authorization: Bearer $AEP_DEV_API_KEY" http://localhost:8000/v1/tools   # or: -H "X-API-Key: ..."
 ```
 
-The `none`-mode tool scenario in `failure-walkthrough.sh` also needs `AEP_TOOL_DEV_CREDENTIAL` set to any non-empty value (the mocks accept it). Per-tenant tool credentials use `AEP_TOOL_CRED_<TENANT>_<TOOL>`.
+The `none`-mode tool scenario in `failure-walkthrough.sh` also needs `AEP_TOOL_DEV_CREDENTIAL` set to any non-empty value (the mocks accept it). Per-tenant tool credentials use `AEP_TOOL_CRED_<HEX(tenant)>_<HEX(tool)>`, where each part is the upper-case hex of its UTF-8 bytes, so distinct ids never collide (`t_dev` + `leads.fetch` is `AEP_TOOL_CRED_745F646576_6C656164732E6665746368`). The `AEP_TOOL_DEV_CREDENTIAL` fallback is used only under the `dev` profile; in any other profile, a missing per-tenant credential fails the call.
 
 ### Tests and coverage
 
@@ -123,7 +123,7 @@ Collected from [docs/06](docs/06-execution-plan.md), [docs/design.md](docs/desig
 - **Budgets:** per-execution cost caps are atomic; the tenant budget is created lazily (default 100 USD, monthly) with no period rollover job. Dry-runs default to a 0.50 USD cap.
 - **Tools:** the LLM may call only `READ_ONLY` tools, at most 1 to 3 per node (`maxToolCalls`); tool output is returned to the model marked untrusted. Side-effecting tools run only through the ledger.
 - **Router:** vLLM is configured without `tools`, so tool-calling turns go to llm-a/llm-b. Healthy providers are scored on configured nominal latency; the half-open recovery rule is our own assumption.
-- **SSRF:** `OutboundClient` is the only outbound HTTP path and enforces an allow-list (`AEP_OUTBOUND_ALLOW_HOSTS`) and a self-host deny-list; the HTTP client resolves each host once and connects only to the validated addresses (no DNS-rebinding window), and redirects are never followed.
+- **SSRF:** `OutboundClient` is the only outbound HTTP path and enforces an allow-list (`AEP_OUTBOUND_ALLOW_HOSTS`) and a self-host deny-list; the HTTP client resolves each host once and connects only to the validated addresses (no DNS-rebinding window), and redirects are never followed. Each call has a hard deadline and a response body cap (`aep.outbound.max-response-bytes`, `AEP_OUTBOUND_MAX_RESPONSE_BYTES`, 10 MiB). The connection pool holds 400 connections, 200 per route (`AEP_OUTBOUND_MAX_CONN_TOTAL`, `AEP_OUTBOUND_MAX_CONN_PER_ROUTE`); a pool wait (`connection-request-timeout`, 1 s) fails as retryable `UPSTREAM_NOT_SENT`.
 - **PDF §4 fixture** (`app/src/test/resources/fixtures/pdf-example.json`) is a reconstruction of the assignment example.
 
 ## AI-tool usage
@@ -136,11 +136,11 @@ Where the plan was overridden (full list with reasons in [docs/ai-usage.md](docs
 - The `full` profile uses `temporalio/server` plus admin-tools one-shots instead of `auto-setup`, which stops at 1.29.x. Fairness scheduling under load is not yet verified.
 - The lite dev server runs as root so it can write its SQLite file on the named volume (local only).
 - No seeded API keys in SQL; the `dev` profile seeder hashes keys from environment variables.
-- Provider 409 "in progress" is retried (`EFFECT_IN_PROGRESS`); 429 releases the ledger row; 5xx expires the lease; timeouts keep it. An unknown effect surfaces as `NEEDS_ATTENTION`, not `FAILED` / `COMPENSATION_FAILED`.
+- Provider 409 "in progress" is retried (`EFFECT_IN_PROGRESS`); 429 releases the ledger row; 5xx expires the lease; timeouts keep it. Leases use the database clock. An unknown effect surfaces as `NEEDS_ATTENTION`, not `FAILED` / `COMPENSATION_FAILED`.
 - Extra tables and columns beyond the spec: `execution_budget`, ledger `response`, a seeded `crm.delete` compensation tool.
 - The PDF §9 timing tests are scaled in the suite (3 s provider, 2 s timeout); the full-size PDF timing runs in `failure-walkthrough.sh`.
 - `vllm-degradation.sh` default rate is 40 req/s, the minimum for recovery. The old curl-per-request driver delivered only about 35 req/s when asked for 50, so the driver now batches requests per tick (`curl --parallel`) and delivers the requested rate; it prints the measured rate.
-- Found and fixed by review: START_FAILED reconciliation, `node_run` rows closing exactly once, a budget-reservation reaper.
+- Found and fixed by review: START_FAILED reconciliation, `node_run` rows closing exactly once, a budget-reservation reaper. The final review's high and medium findings (H1-H3, M1-M7) are fixed, one commit each; see docs/ai-usage.md.
 
 ## Cut and stretch items
 
@@ -150,7 +150,7 @@ Status keys as in the design doc: built, built slice, design only. Plan referenc
 |---|---|---|
 | Approval node (signal + timer) | Not built; `NODE_TYPES` is `http`, `llm`, `mcp`, `condition` | design §2 |
 | `REPLAY` execution mode | Not built; `mode=REPLAY` returns 501 `NOT_IMPLEMENTED`. Orchestration replay is covered by 2 `WorkflowReplayer` tests | design §10 |
-| Diamond-aware parallel compensation | Design only; compensation is sequential in reverse completion order | design §5 |
+| Diamond-aware parallel compensation | Design only; compensation is sequential in reverse start order | design §5 |
 | Deficit round-robin dispatcher, daily quotas | Design only; prototype rejects with 429 | design §7 |
 | Redis limiter and router health, per tenant x provider buckets | Design only; limiter and health are in memory per instance (Redis runs in `full` but is unused by the app) | design §6, §7, §13 |
 | OTel to Jaeger | Not built; `/trace` from Postgres is the end-to-end trace | design §11 |
@@ -165,14 +165,14 @@ Status keys as in the design doc: built, built slice, design only. Plan referenc
 
 ## Test coverage (JaCoCo)
 
-Generated with `./gradlew check jacocoTestReport` on this branch: BUILD SUCCESSFUL, 413 tests (app and mocks), 0 failures, 2 skipped (the history recorders, which run only with `AEP_RECORD_HISTORIES=true`).
+Generated with `./gradlew check jacocoTestReport` on this branch: BUILD SUCCESSFUL, 474 tests (438 app, 36 mocks), 0 failures, 2 skipped (the history recorders, which run only with `AEP_RECORD_HISTORIES=true`).
 
 | Module | Line | Branch | Instruction |
 |---|---|---|---|
-| `app` | 92.7 % (4189 / 4518) | 76.6 % (1652 / 2158) | 92.1 % |
-| `mocks` | 95.5 % (447 / 468) | 75.0 % (108 / 144) | 95.9 % |
+| `app` | 92.9 % (4411 / 4746) | 77.3 % (1775 / 2295) | 92.4 % |
+| `mocks` | 95.8 % (476 / 497) | 76.6 % (118 / 154) | 96.2 % |
 
-By `app` package (line coverage): `router` 99 %, `dryrun` 96 %, `definition` 97 % and `definition.validation` 96 %, `tenancy` 96 %, `observability` 97 %, `engine.workflow` 92 %, `engine.activity` 87 %, `engine.temporal` 87 %, `sideeffect` 86 %, `tools.mcp` 86 %, `common.http` 82 %. The weakest spots are the dev-only `router.web` debug controller (14 %) and `router.persistence` (61 %). ArchUnit rules enforce the layering and the determinism of `engine.workflow`.
+By `app` package (line coverage): `router` 99 %, `dryrun` 96 %, `definition` 97 % and `definition.validation` 96 %, `tenancy` 96 %, `observability` 94 %, `engine.workflow` 92 %, `sideeffect` 91 %, `common.http` 91 %, `engine.activity` 87 %, `engine.temporal` 87 %, `tools.mcp` 87 %, `engine.reconcile` 83 %. The weakest spots are the dev-only `router.web` debug controller (14 %) and `router.persistence` (61 %). ArchUnit rules enforce the layering and the determinism of `engine.workflow`.
 
 ## With more time
 
