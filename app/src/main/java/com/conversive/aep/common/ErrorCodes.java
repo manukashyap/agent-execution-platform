@@ -31,6 +31,7 @@ public final class ErrorCodes {
     public static final String UPSTREAM_IO = "UPSTREAM_IO";
     public static final String EGRESS_DENIED = "EGRESS_DENIED";
     public static final String NO_PROVIDER_AVAILABLE = "NO_PROVIDER_AVAILABLE";
+    public static final String LLM_UNAVAILABLE = "LLM_UNAVAILABLE";
     public static final String INTERNAL = "INTERNAL";
 
     private ErrorCodes() {
