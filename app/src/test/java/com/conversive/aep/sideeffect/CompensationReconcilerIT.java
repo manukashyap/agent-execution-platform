@@ -119,9 +119,9 @@ class CompensationReconcilerIT extends LedgerTestSupport {
         assertThatThrownBy(() -> decide(Reversibility.COMPENSATABLE))
                 .isInstanceOfSatisfying(RetryableError.class, e -> {
                     assertThat(e.code()).isEqualTo(ErrorCodes.EFFECT_IN_PROGRESS);
-                    // CompensationReconciler still derives the delay from the node clock (LedgerEntry#leaseRemaining is the
-                    // database-clock value it should use); only liveness, which the ledger decides, is asserted here.
-                    assertThat(e.nextRetryDelay()).isPositive();
+                    // the delay is the lease time left on the database clock, so node clock skew cannot shorten it
+                    Duration left = TimingContract.lease(START_TO_CLOSE).minusSeconds(5);
+                    assertThat(e.nextRetryDelay()).isBetween(left.minusSeconds(2), left);
                 });
     }
 
@@ -164,7 +164,7 @@ class CompensationReconcilerIT extends LedgerTestSupport {
     void lookupForwardThatUpdatedAPreExistingRecordNeedsAttentionInsteadOfBeingCompensated() {
         EffectSpec forward = forward(1, IdempotencyMode.LOOKUP, START_TO_CLOSE);
         leavePending(forward);
-        clock.advance(TimingContract.lease(START_TO_CLOSE));
+        advanceLeases(TimingContract.lease(START_TO_CLOSE));
         JsonNode found = mapper.createObjectNode().put("external_ref", "crm_9").put("created", false);
 
         CompensationDecision decision = reconciler.decide(TENANT, execution, NODE, 0,

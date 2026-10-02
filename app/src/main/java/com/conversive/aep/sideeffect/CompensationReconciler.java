@@ -13,7 +13,6 @@ import com.conversive.aep.sideeffect.CompensationDecision.Kind;
 import com.conversive.aep.sideeffect.persistence.LedgerRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 import org.springframework.stereotype.Component;
@@ -73,8 +72,8 @@ public class CompensationReconciler {
             case COMMITTED -> Optional.of(executed(reversibility, row.response()));
             case FAILED -> Optional.of(CompensationDecision.of(Kind.SKIP, "forward effect failed definitively"));
             case PENDING, UNKNOWN -> {
-                if (row.state() == LedgerState.PENDING && row.leaseLiveAt(now)) {
-                    throw inProgress(row, now);
+                if (row.state() == LedgerState.PENDING && row.leaseLive()) {
+                    throw inProgress(row);
                 }
                 yield unresolved(row, reversibility, forward, now);
             }
@@ -136,9 +135,8 @@ public class CompensationReconciler {
         return created != null && created.isBoolean() && !created.asBoolean();
     }
 
-    private static RetryableError inProgress(LedgerEntry row, Instant now) {
-        Duration left = Duration.between(now, row.leaseUntil());
+    private static RetryableError inProgress(LedgerEntry row) {
         return new RetryableError(ErrorCodes.EFFECT_IN_PROGRESS,
-                "forward effect " + row.key() + " is still owned until " + row.leaseUntil(), left);
+                "forward effect " + row.key() + " is still owned until " + row.leaseUntil(), row.leaseRemaining());
     }
 }
