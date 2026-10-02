@@ -203,3 +203,9 @@ P8 (observability, T8.1/T8.2) deviations and assumptions:
   - `nodeCompleted` fires on success, or on a failure that is final (non-retryable, cancelled, or the last attempt). Its latency is measured from the first schedule.
   - `nodeRetried` and `scheduleToStart` fire at activity entry.
   - `compensation` fires per step: COMPENSATED becomes SUCCEEDED; NEEDS_ATTENTION, PIVOT_EXECUTED or a final failure become FAILED; SKIPPED is not counted.
+
+### Checkpoint A fixes
+
+- **node_run closes exactly once (supersedes "Orphaned RUNNING rows" above):** a row leaves RUNNING once; later writes to it are no-ops. A new attempt closes earlier RUNNING attempts as FAILED/`TIMEOUT`. When an attempt fails without an ApplicationFailure (StartToClose, heartbeat timeout, worker death), the interpreter closes the node's RUNNING rows. An attempt whose heartbeat finds it gone (`ActivityNotExistsException`) records FAILED/`TIMEOUT`, not CANCELLED.
+- **START_FAILED reconciled (resolves the "Open" START_FAILED note above):** the first workflow transition accepts QUEUED or START_FAILED → RUNNING, so a run that Temporal accepted while the client saw an error moves the row forward by itself. On "already started", the launcher describes the run. If the run is open, the start succeeds. If the run has closed, the replay records it on the row as terminal (TIMED_OUT, CANCELLED, otherwise FAILED) with `error_code=START_FAILED`, instead of leaving the row QUEUED. The response is then that row, not a 503.
+- **Budget reservation reaper:** `cost.BudgetReservationReaper` runs every `aep.cost.reaper.interval` (default 60 s). Each run cancels up to `batch-size` (100) RESERVED rows older than `max-age` (15 min) through `BudgetService.cancel`, which releases both counters. A confirm that arrives after that still records the spend. Its scan is the one cross-tenant read in `cost`; each cancel uses the row's own `tenant_id`.

@@ -5,6 +5,8 @@ import com.conversive.aep.common.ExecutionId;
 import com.conversive.aep.common.RetryableError;
 import com.conversive.aep.common.TenantId;
 import com.conversive.aep.engine.ExecutionLauncher;
+import com.conversive.aep.engine.RunAlreadyClosedException;
+import com.conversive.aep.execution.ExecutionStatus;
 import com.conversive.aep.engine.workflow.DagInterpreterWorkflow;
 import com.conversive.aep.engine.workflow.ExecutionRequest;
 import com.conversive.aep.engine.workflow.WorkflowNames;
@@ -27,7 +29,8 @@ import org.springframework.stereotype.Component;
 /**
  * Starts one {@code DagInterpreterWorkflow} per execution with id {@code exec:{tenant}:{execId}}.
  * The id plus {@code USE_EXISTING} makes a repeated start attach instead of duplicating; an
- * "already started" answer therefore counts as success.
+ * "already started" answer counts as success while that run is open, and as {@link RunAlreadyClosedException}
+ * once it has closed.
  */
 @Component
 public class TemporalExecutionLauncher implements ExecutionLauncher {
@@ -65,6 +68,7 @@ public class TemporalExecutionLauncher implements ExecutionLauncher {
                 client.newUntypedWorkflowStub(WorkflowNames.DAG_INTERPRETER, options).start(request);
                 return;
             } catch (WorkflowExecutionAlreadyStarted alreadyStarted) {
+                requireOpen(options.getWorkflowId());
                 return;
             } catch (RuntimeException e) {
                 last = e;
@@ -96,6 +100,30 @@ public class TemporalExecutionLauncher implements ExecutionLauncher {
 
     public static String workflowId(TenantId tenantId, ExecutionId executionId) {
         return DagInterpreterWorkflow.workflowId(tenantId.value(), executionId.toString());
+    }
+
+    /**
+     * "Already started" is success only while that run is still open: with REJECT_DUPLICATE a closed run is
+     * never restarted, so the caller must record its outcome instead of waiting for a worker.
+     */
+    private void requireOpen(String workflowId) {
+        WorkflowExecutionStatus status;
+        try {
+            status = client.newUntypedWorkflowStub(workflowId).describe().getStatus();
+        } catch (RuntimeException e) {
+            throw new RetryableError(ErrorCodes.START_FAILED, "the execution engine is unavailable; retry later",
+                    props.retryAfter(), e);
+        }
+        if (status == WorkflowExecutionStatus.WORKFLOW_EXECUTION_STATUS_RUNNING) {
+            return;
+        }
+        ExecutionStatus outcome = switch (status) {
+            case WORKFLOW_EXECUTION_STATUS_TIMED_OUT -> ExecutionStatus.TIMED_OUT;
+            case WORKFLOW_EXECUTION_STATUS_CANCELED -> ExecutionStatus.CANCELLED;
+            default -> ExecutionStatus.FAILED;
+        };
+        throw new RunAlreadyClosedException(outcome, "the engine run closed (" + status.name()
+                .replace("WORKFLOW_EXECUTION_STATUS_", "") + ") without running this execution; start a new one");
     }
 
     private WorkflowOptions options(ExecutionRequest request) {

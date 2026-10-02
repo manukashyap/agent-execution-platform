@@ -138,6 +138,25 @@ class LedgerSideEffectGuardIT extends LedgerTestSupport {
     }
 
     @Test
+    void rateLimitedReCallAfterATakeoverKeepsTheRowBecauseAnEarlierAttemptMayHaveLanded() {
+        EffectSpec attempt1 = forward(1, IdempotencyMode.NATIVE_KEY, START_TO_CLOSE);
+        assertThatThrownBy(() -> guard.run(attempt1, key -> {
+            throw new RetryableError(ErrorCodes.UPSTREAM_TIMEOUT, "timeout");
+        })).isInstanceOf(RetryableError.class);
+        clock.advance(Duration.ofSeconds(15));
+        wireMock.stubFor(post("/payments/charge").willReturn(aResponse().withStatus(429).withHeader("Retry-After", "1")));
+        EffectSpec attempt2 = forward(2, IdempotencyMode.NATIVE_KEY, START_TO_CLOSE);
+
+        assertThatThrownBy(() -> guard.run(attempt2, charge(attempt2)))
+                .isInstanceOfSatisfying(RetryableError.class,
+                        e -> assertThat(e.code()).isEqualTo(ErrorCodes.UPSTREAM_RATE_LIMITED));
+
+        assertThat(row(attempt1)).returns(LedgerState.PENDING, LedgerEntry::state)
+                .returns(2, LedgerEntry::ownerAttempt)
+                .returns(clock.instant(), LedgerEntry::leaseUntil);
+    }
+
+    @Test
     void lookupModeCommitsAnEffectFoundByLookupWithoutCallingAgain() {
         EffectSpec attempt1 = spec("crm", Phase.FORWARD, 1, IdempotencyMode.LOOKUP,
                 START_TO_CLOSE);

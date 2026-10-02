@@ -30,8 +30,9 @@ public class DagInterpreterWorkflowImpl implements DagInterpreterWorkflow {
     public ExecutionResult run(ExecutionRequest request) {
         state = new DagState(request.definition());
         StateCalls calls = new StateCalls(request.tenantId(), request.executionId());
-        TransitionResult started = calls.transition(Set.of(ExecutionStatus.QUEUED), ExecutionStatus.RUNNING,
-                null, null, null);
+        // START_FAILED too: the client may have seen an error for a start Temporal did accept; the row self-heals.
+        TransitionResult started = calls.transition(Set.of(ExecutionStatus.QUEUED, ExecutionStatus.START_FAILED),
+                ExecutionStatus.RUNNING, null, null, null);
         if (!started.applied() && started.current() != ExecutionStatus.RUNNING) {
             ExecutionStatus current = started.current() == null ? ExecutionStatus.FAILED : started.current();
             state.status(current);

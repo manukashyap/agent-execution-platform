@@ -21,7 +21,10 @@ import com.conversive.aep.support.InProcessTemporal;
 import com.conversive.aep.support.PostgresIntegrationTest;
 import com.conversive.aep.support.TestTenants;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.conversive.aep.engine.workflow.WorkflowNames;
 import io.temporal.client.WorkflowClient;
+import io.temporal.client.WorkflowOptions;
+import io.temporal.client.WorkflowStub;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -50,6 +53,7 @@ class StartFailedReplayIT extends PostgresIntegrationTest {
 
         final AtomicInteger failures = new AtomicInteger();
         final AtomicInteger starts = new AtomicInteger();
+        volatile ExecutionRequest lastRequest;
         private final ExecutionLauncher real;
 
         FlakyLauncher(ExecutionLauncher real) {
@@ -59,6 +63,7 @@ class StartFailedReplayIT extends PostgresIntegrationTest {
         @Override
         public void start(ExecutionRequest request) {
             starts.incrementAndGet();
+            lastRequest = request;
             if (failures.getAndUpdate(n -> Math.max(0, n - 1)) > 0) {
                 throw new RetryableError(ErrorCodes.START_FAILED, "temporal unreachable (test)", null);
             }
@@ -80,6 +85,8 @@ class StartFailedReplayIT extends PostgresIntegrationTest {
     @Autowired
     FlakyLauncher launcher;
     @Autowired
+    TemporalExecutionLauncher realLauncher;
+    @Autowired
     WorkflowClient client;
     @Autowired
     JdbcClient jdbc;
@@ -93,6 +100,7 @@ class StartFailedReplayIT extends PostgresIntegrationTest {
         StartCommand cmd = new StartCommand("lead_enrichment", null, mapper.readTree("{}"), null, null, null,
                 "replay-1");
 
+        launcher.starts.set(0);
         launcher.failures.set(2);
         assertThatThrownBy(() -> executions.start(tenant, cmd)).isInstanceOf(RetryableError.class);
         ExecutionId id = repository.findByIdempotencyKey(tenant, "replay-1").orElseThrow().id();
@@ -115,6 +123,49 @@ class StartFailedReplayIT extends PostgresIntegrationTest {
         assertThat(status(tenant, id)).isEqualTo(ExecutionStatus.SUCCEEDED);
         assertThat(executions.start(tenant, cmd).execution().id()).isEqualTo(id);
         assertThat(launcher.starts.get()).isEqualTo(3);
+    }
+
+    @Test
+    void aRunTemporalStartedWhileTheClientSawAFailureStillRunsAndHealsTheRow() throws Exception {
+        TenantId tenant = new TestTenants(jdbc).create("t_heal");
+        definitions.publish(tenant, mapper.readTree(Fixtures.pdfExampleJson()));
+        StartCommand cmd = new StartCommand("lead_enrichment", null, mapper.readTree("{}"), null, null, null,
+                "heal-1");
+        launcher.failures.set(1);
+        assertThatThrownBy(() -> executions.start(tenant, cmd)).isInstanceOf(RetryableError.class);
+        ExecutionId id = repository.findByIdempotencyKey(tenant, "heal-1").orElseThrow().id();
+        assertThat(status(tenant, id)).isEqualTo(ExecutionStatus.START_FAILED);
+
+        // Temporal had in fact accepted the start: the run begins while the row says START_FAILED.
+        realLauncher.start(launcher.lastRequest);
+
+        ExecutionResult result = client.newUntypedWorkflowStub(
+                DagInterpreterWorkflow.workflowId(tenant.value(), id.toString())).getResult(ExecutionResult.class);
+        assertThat(result.status()).isEqualTo(ExecutionStatus.SUCCEEDED);
+        assertThat(status(tenant, id)).isEqualTo(ExecutionStatus.SUCCEEDED);
+    }
+
+    @Test
+    void replayFindingTheRunAlreadyClosedRecordsItsOutcomeInsteadOfStayingQueued() throws Exception {
+        TenantId tenant = new TestTenants(jdbc).create("t_closed");
+        definitions.publish(tenant, mapper.readTree(Fixtures.pdfExampleJson()));
+        StartCommand cmd = new StartCommand("lead_enrichment", null, mapper.readTree("{}"), null, null, null,
+                "closed-1");
+        launcher.failures.set(1);
+        assertThatThrownBy(() -> executions.start(tenant, cmd)).isInstanceOf(RetryableError.class);
+        ExecutionId id = repository.findByIdempotencyKey(tenant, "closed-1").orElseThrow().id();
+        // The run Temporal accepted closed without touching the row (here: terminated before any worker ran it).
+        WorkflowStub orphan = client.newUntypedWorkflowStub(WorkflowNames.DAG_INTERPRETER,
+                WorkflowOptions.newBuilder().setTaskQueue("unpolled")
+                        .setWorkflowId(DagInterpreterWorkflow.workflowId(tenant.value(), id.toString())).build());
+        orphan.start(launcher.lastRequest);
+        orphan.terminate("test: closed before running");
+
+        ExecutionService.StartResult replay = executions.start(tenant, cmd);
+
+        assertThat(replay.execution().id()).isEqualTo(id);
+        assertThat(replay.execution().status()).isEqualTo(ExecutionStatus.FAILED);
+        assertThat(replay.execution().errorCode()).isEqualTo(ErrorCodes.START_FAILED);
     }
 
     private ExecutionStatus status(TenantId tenant, ExecutionId id) {

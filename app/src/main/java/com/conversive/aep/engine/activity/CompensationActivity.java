@@ -13,6 +13,12 @@ import java.util.Objects;
 @ActivityInterface
 public interface CompensationActivity {
 
+    /**
+     * Forward re-runs one attempt may make before giving up as NEEDS_ATTENTION. With the inverse, one attempt
+     * makes at most {@code MAX_RECONCILE_ROUNDS + 1} calls, each bounded by the node timeout.
+     */
+    int MAX_RECONCILE_ROUNDS = 2;
+
     @ActivityMethod(name = "CompensateNode")
     CompensationOutcome compensate(CompensationTask task);
 

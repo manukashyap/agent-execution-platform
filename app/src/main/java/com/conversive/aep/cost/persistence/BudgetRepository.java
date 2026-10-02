@@ -3,6 +3,7 @@ package com.conversive.aep.cost.persistence;
 import com.conversive.aep.common.ExecutionId;
 import com.conversive.aep.common.TenantId;
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -154,6 +155,29 @@ public class BudgetRepository {
                 .query((rs, n) -> new Transition("RESERVED", rs.getBigDecimal(1),
                         new ExecutionId(rs.getObject(2, UUID.class))))
                 .optional();
+    }
+
+    /** An open reservation as the reaper sees it; the tenant comes from the row. */
+    public record OpenReservation(UUID id, TenantId tenantId, BigDecimal amountUsd) {
+    }
+
+    /**
+     * RESERVED rows older than {@code minAgeSeconds}, oldest first (index {@code budget_reservation_open_idx}).
+     * This is the only cross-tenant read here: it serves the system reaper, and each row is then cancelled
+     * through the tenant-filtered path with its own {@code tenant_id}.
+     */
+    public List<OpenReservation> findAbandoned(long minAgeSeconds, int limit) {
+        return jdbc.sql("""
+                SELECT id, tenant_id, amount_usd FROM budget_reservation
+                WHERE status = 'RESERVED' AND created_at < now() - make_interval(secs => :age)
+                ORDER BY created_at
+                LIMIT :limit
+                """)
+                .param("age", minAgeSeconds)
+                .param("limit", limit)
+                .query((rs, n) -> new OpenReservation(rs.getObject(1, UUID.class), new TenantId(rs.getString(2)),
+                        rs.getBigDecimal(3)))
+                .list();
     }
 
     /** Releases {@code release} from reserved and adds {@code spend} to spent on both counter rows. */
