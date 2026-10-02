@@ -17,13 +17,15 @@ public class ExecutionStateActivityImpl implements ExecutionStateActivity {
     private final NodeRunRepository runs;
     private final NodeInputAssembler inputs;
     private final Clock clock;
+    private final ActivityTelemetry telemetry;
 
     public ExecutionStateActivityImpl(ExecutionRepository executions, NodeRunRepository runs,
-                                      NodeInputAssembler inputs, Clock clock) {
+                                      NodeInputAssembler inputs, Clock clock, ActivityTelemetry telemetry) {
         this.executions = executions;
         this.runs = runs;
         this.inputs = inputs;
         this.clock = clock;
+        this.telemetry = telemetry;
     }
 
     @Override
@@ -31,6 +33,10 @@ public class ExecutionStateActivityImpl implements ExecutionStateActivity {
         StatusUpdate update = new StatusUpdate(clock.instant(), t.errorCode(), t.errorMessage(), t.output());
         boolean applied = executions.cas(t.tenantId(), t.executionId(), t.from(), t.to(), update);
         if (applied) {
+            if (t.to().isTerminal()) {
+                executions.findById(t.tenantId(), t.executionId()).ifPresent(r -> telemetry.executionCompleted(
+                        r.tenantId(), r.workflowId(), r.status().name(), r.startedAt()));
+            }
             return new TransitionResult(true, t.to());
         }
         return new TransitionResult(false, executions.findById(t.tenantId(), t.executionId())

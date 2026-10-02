@@ -14,8 +14,12 @@ import org.testcontainers.containers.PostgreSQLContainer;
 @ActiveProfiles("test")
 public abstract class PostgresIntegrationTest {
 
+    /** Every cached Spring context keeps its own Hikari pool open against the shared container. */
+    private static final int MAX_CONNECTIONS = 400;
+
     @ServiceConnection
-    protected static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
+    protected static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine")
+            .withCommand("postgres", "-c", "max_connections=" + MAX_CONNECTIONS);
 
     static {
         POSTGRES.start();

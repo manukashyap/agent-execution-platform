@@ -18,6 +18,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.NullNode;
 import io.temporal.activity.Activity;
 import io.temporal.activity.ActivityExecutionContext;
+import io.temporal.activity.ActivityInfo;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
@@ -38,10 +39,11 @@ public class NodeActivityImpl implements NodeActivity {
     private final HeartbeatingRunner runner;
     private final ObjectMapper mapper;
     private final Clock clock;
+    private final ActivityTelemetry telemetry;
 
     public NodeActivityImpl(ExecutorRegistry executors, NodeInputAssembler inputs, NodeRunRepository runs,
                             NodeOutputRepository outputs, HeartbeatingRunner runner, ObjectMapper mapper,
-                            Clock clock) {
+                            Clock clock, ActivityTelemetry telemetry) {
         this.executors = executors;
         this.inputs = inputs;
         this.runs = runs;
@@ -49,12 +51,15 @@ public class NodeActivityImpl implements NodeActivity {
         this.runner = runner;
         this.mapper = mapper;
         this.clock = clock;
+        this.telemetry = telemetry;
     }
 
     @Override
     public NodeOutputRef run(NodeTask task) {
         ActivityExecutionContext activity = Activity.getExecutionContext();
-        int attempt = activity.getInfo().getAttempt();
+        ActivityInfo info = activity.getInfo();
+        int attempt = info.getAttempt();
+        telemetry.attemptStarted(info, task.tenantId(), task.workflowId(), task.nodeType());
         RunKey key = new RunKey(task.tenantId(), task.executionId(), task.nodeId(), task.callIndex(), Phase.FORWARD,
                 attempt);
         runs.started(key, clock.instant());
@@ -64,9 +69,13 @@ public class NodeActivityImpl implements NodeActivity {
             NodeResult result = runner.run(activity, task.sideEffecting(), () -> executor.execute(ctx));
             NodeOutputRef ref = store(task, attempt, result);
             runs.finished(key, NodeStatus.SUCCEEDED.name(), null, null, clock.instant());
+            telemetry.nodeCompleted(info, task.tenantId(), task.workflowId(), task.nodeType(),
+                    NodeStatus.SUCCEEDED.name());
             return ref;
         } catch (RuntimeException e) {
-            throw fail(key, e);
+            RuntimeException failure = fail(key, e);
+            reportFailure(info, task, failure);
+            throw failure;
         }
     }
 
@@ -98,6 +107,14 @@ public class NodeActivityImpl implements NodeActivity {
             log.warn("could not record the failure of node {} of {}", key.nodeId(), key.executionId(), dbError);
         }
         return cancelled ? e : Failures.toApplicationFailure(e);
+    }
+
+    private void reportFailure(ActivityInfo info, NodeTask task, RuntimeException failure) {
+        boolean cancelled = HeartbeatingRunner.isCancellation(failure);
+        if (cancelled || ActivityTelemetry.isFinalAttempt(info, failure)) {
+            telemetry.nodeCompleted(info, task.tenantId(), task.workflowId(), task.nodeType(),
+                    cancelled ? NodeStatus.CANCELLED.name() : NodeStatus.FAILED.name());
+        }
     }
 
     private String write(JsonNode output) {

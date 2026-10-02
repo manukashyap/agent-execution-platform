@@ -18,6 +18,8 @@ import com.fasterxml.jackson.databind.node.NullNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.temporal.activity.Activity;
 import io.temporal.activity.ActivityExecutionContext;
+import io.temporal.activity.ActivityInfo;
+import io.temporal.failure.ApplicationFailure;
 import java.time.Clock;
 import java.time.Duration;
 import org.slf4j.Logger;
@@ -39,26 +41,42 @@ public class CompensationActivityImpl implements CompensationActivity {
     private final NodeRunRepository runs;
     private final HeartbeatingRunner runner;
     private final Clock clock;
+    private final ActivityTelemetry telemetry;
 
     public CompensationActivityImpl(CompensationReconciler reconciler, ExecutorRegistry executors,
                                     NodeInputAssembler inputs, NodeRunRepository runs, HeartbeatingRunner runner,
-                                    Clock clock) {
+                                    Clock clock, ActivityTelemetry telemetry) {
         this.reconciler = reconciler;
         this.executors = executors;
         this.inputs = inputs;
         this.runs = runs;
         this.runner = runner;
         this.clock = clock;
+        this.telemetry = telemetry;
     }
 
     @Override
     public CompensationOutcome compensate(CompensationTask task) {
         ActivityExecutionContext activity = Activity.getExecutionContext();
-        int attempt = activity.getInfo().getAttempt();
+        ActivityInfo info = activity.getInfo();
+        NodeTask fwd = task.forward();
+        String type = task.compensation() == null ? fwd.nodeType() : task.compensation().type();
+        telemetry.attemptStarted(info, fwd.tenantId(), fwd.workflowId(), type);
         try {
-            return decideAndRun(task, attempt, activity);
+            CompensationOutcome outcome = decideAndRun(task, info.getAttempt(), activity);
+            if (outcome.result() != Result.SKIPPED) {
+                telemetry.compensation(outcome.result() == Result.COMPENSATED);
+            }
+            return outcome;
         } catch (RuntimeException e) {
-            throw HeartbeatingRunner.isCancellation(e) ? e : Failures.toApplicationFailure(e);
+            if (HeartbeatingRunner.isCancellation(e)) {
+                throw e;
+            }
+            ApplicationFailure failure = Failures.toApplicationFailure(e);
+            if (ActivityTelemetry.isFinalAttempt(info, failure)) {
+                telemetry.compensation(false);
+            }
+            throw failure;
         }
     }
 
@@ -110,12 +128,19 @@ public class CompensationActivityImpl implements CompensationActivity {
         RunKey key = new RunKey(fwd.tenantId(), fwd.executionId(), fwd.nodeId(), fwd.callIndex(), Phase.COMPENSATE,
                 attempt);
         runs.started(key, clock.instant());
+        String type = task.compensation().type();
         try {
             NodeContext ctx = inverseContext(fwd, task.compensation(), attempt, forwardResponse);
             runner.run(activity, true, () -> executors.resolve(ctx).execute(ctx));
             runs.finished(key, NodeStatus.SUCCEEDED.name(), null, null, clock.instant());
+            telemetry.nodeCompleted(activity.getInfo(), fwd.tenantId(), fwd.workflowId(), type,
+                    NodeStatus.SUCCEEDED.name());
         } catch (RuntimeException e) {
             recordFailure(key, e);
+            if (ActivityTelemetry.isFinalAttempt(activity.getInfo(), Failures.toApplicationFailure(e))) {
+                telemetry.nodeCompleted(activity.getInfo(), fwd.tenantId(), fwd.workflowId(), type,
+                        NodeStatus.FAILED.name());
+            }
             throw e;
         }
     }
