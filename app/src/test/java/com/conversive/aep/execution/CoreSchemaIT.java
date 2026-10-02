@@ -30,7 +30,7 @@ class CoreSchemaIT extends PostgresIntegrationTest {
         assertThat(jdbc.sql("SELECT version FROM flyway_schema_history WHERE success").query(String.class).list())
                 .contains("1");
         assertThat(jdbc.sql("SELECT id FROM tenant ORDER BY id").query(String.class).list())
-                .containsExactly("t_dev", "t_other");
+                .contains("t_dev", "t_other"); // other ITs add per-test tenants to the shared container
         assertThat(jdbc.sql("SELECT max_node_executions FROM tenant_limits WHERE tenant_id = 't_dev'")
                 .query(Integer.class).single()).isEqualTo(500);
     }

@@ -1,8 +1,18 @@
 package com.conversive.aep.support;
 
+import com.conversive.aep.common.ExecutionId;
+import com.conversive.aep.common.ExecutionMode;
+import com.conversive.aep.common.TenantId;
+import com.conversive.aep.definition.DefinitionFreezer;
+import com.conversive.aep.definition.DefinitionProperties;
+import com.conversive.aep.definition.InMemoryToolCatalog;
 import com.conversive.aep.definition.model.DefinitionCodec;
+import com.conversive.aep.definition.model.FrozenDefinition;
 import com.conversive.aep.definition.model.WorkflowDefinition;
+import com.conversive.aep.engine.workflow.ExecutionRequest;
+import com.conversive.aep.tenancy.TenantLimits;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
@@ -34,5 +44,15 @@ public final class Fixtures {
 
     public static WorkflowDefinition pdfExampleDefinition() {
         return DefinitionCodec.parse(pdfExample());
+    }
+
+    public static FrozenDefinition frozenPdfExample(TenantId tenantId) {
+        return new DefinitionFreezer(DefinitionProperties.defaults(), new InMemoryToolCatalog())
+                .freeze(pdfExampleDefinition(), "sha-test", TenantLimits.defaults(tenantId));
+    }
+
+    public static ExecutionRequest pdfExampleRequest(TenantId tenantId, ExecutionId executionId, long deadlineMs) {
+        return new ExecutionRequest(tenantId, executionId, frozenPdfExample(tenantId),
+                JsonNodeFactory.instance.objectNode(), ExecutionMode.LIVE, null, null, deadlineMs);
     }
 }

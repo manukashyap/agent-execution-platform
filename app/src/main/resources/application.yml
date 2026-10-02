@@ -55,6 +55,14 @@ aep:
     default-initial-interval-ms: 1000
     default-max-parallel: 16
     default-for-each-concurrency: 16
+  engine:
+    launcher:
+      start-attempts: 3
+      start-backoff: 200ms
+      retry-after: 5s
+      run-timeout-slack: 1h
+  api:
+    start-failed-retry-after-s: 5
   tenancy:
     dev:
       dev-api-key: ${AEP_DEV_API_KEY:}
