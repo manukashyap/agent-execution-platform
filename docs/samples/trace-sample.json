@@ -1,0 +1,187 @@
+{
+  "data" : {
+    "executionId" : "7ee0b4f7-1e60-4d8f-b0f4-b2a480c65535",
+    "workflowId" : "lead_enrichment",
+    "version" : 1,
+    "mode" : "LIVE",
+    "status" : "SUCCEEDED",
+    "errorCode" : null,
+    "startedAt" : "2026-01-15T10:00:00Z",
+    "endedAt" : "2026-01-15T10:00:09Z",
+    "durationMs" : 9000,
+    "totals" : {
+      "nodes" : 4,
+      "attempts" : 5,
+      "retries" : 1,
+      "llmCalls" : 2,
+      "llmFallbacks" : 1,
+      "promptTokens" : 420,
+      "completionTokens" : 80,
+      "totalTokens" : 500,
+      "costUsd" : 0.002,
+      "toolCalls" : 2,
+      "budget" : {
+        "limitUsd" : 5,
+        "reservedUsd" : 0,
+        "confirmedUsd" : 0.002,
+        "cancelledReservations" : 1
+      }
+    },
+    "nodes" : [ {
+      "nodeId" : "fetch_leads",
+      "type" : "http",
+      "callIndex" : 0,
+      "phase" : "FORWARD",
+      "status" : "SUCCEEDED",
+      "attempts" : 2,
+      "retries" : 1,
+      "startedAt" : "2026-01-15T10:00:00Z",
+      "endedAt" : "2026-01-15T10:00:03.400Z",
+      "durationMs" : 3400,
+      "errorCode" : null,
+      "attemptHistory" : [ {
+        "attempt" : 1,
+        "status" : "FAILED",
+        "startedAt" : "2026-01-15T10:00:00Z",
+        "endedAt" : "2026-01-15T10:00:02Z",
+        "durationMs" : 2000,
+        "errorCode" : "UPSTREAM_TIMEOUT"
+      }, {
+        "attempt" : 2,
+        "status" : "SUCCEEDED",
+        "startedAt" : "2026-01-15T10:00:03Z",
+        "endedAt" : "2026-01-15T10:00:03.400Z",
+        "durationMs" : 400,
+        "errorCode" : null
+      } ],
+      "llmCalls" : [ ],
+      "toolCalls" : [ ],
+      "sideEffects" : [ ]
+    }, {
+      "nodeId" : "classify_leads",
+      "type" : "llm",
+      "callIndex" : 0,
+      "phase" : "FORWARD",
+      "status" : "SUCCEEDED",
+      "attempts" : 1,
+      "retries" : 0,
+      "startedAt" : "2026-01-15T10:00:03.500Z",
+      "endedAt" : "2026-01-15T10:00:05.500Z",
+      "durationMs" : 2000,
+      "errorCode" : null,
+      "attemptHistory" : [ {
+        "attempt" : 1,
+        "status" : "SUCCEEDED",
+        "startedAt" : "2026-01-15T10:00:03.500Z",
+        "endedAt" : "2026-01-15T10:00:05.500Z",
+        "durationMs" : 2000,
+        "errorCode" : null
+      } ],
+      "llmCalls" : [ {
+        "attempt" : 1,
+        "turn" : 0,
+        "seq" : 0,
+        "provider" : "vllm",
+        "model" : "vllm-default",
+        "reason" : "best_score",
+        "outcome" : "FAILED",
+        "errorCode" : "UPSTREAM_UNAVAILABLE",
+        "promptTokens" : 0,
+        "completionTokens" : 0,
+        "costUsd" : 0,
+        "latencyMs" : 300,
+        "at" : "2026-01-15T10:00:03.800Z"
+      }, {
+        "attempt" : 1,
+        "turn" : 0,
+        "seq" : 1,
+        "provider" : "llm-b",
+        "model" : "model-b",
+        "reason" : "fallback_after_error",
+        "outcome" : "SUCCEEDED",
+        "errorCode" : null,
+        "promptTokens" : 420,
+        "completionTokens" : 80,
+        "costUsd" : 0.002,
+        "latencyMs" : 1500,
+        "at" : "2026-01-15T10:00:05.400Z"
+      } ],
+      "toolCalls" : [ ],
+      "sideEffects" : [ ]
+    }, {
+      "nodeId" : "update_crm",
+      "type" : "mcp",
+      "callIndex" : 0,
+      "phase" : "FORWARD",
+      "status" : "SUCCEEDED",
+      "attempts" : 1,
+      "retries" : 0,
+      "startedAt" : "2026-01-15T10:00:05.600Z",
+      "endedAt" : "2026-01-15T10:00:06Z",
+      "durationMs" : 400,
+      "errorCode" : null,
+      "attemptHistory" : [ {
+        "attempt" : 1,
+        "status" : "SUCCEEDED",
+        "startedAt" : "2026-01-15T10:00:05.600Z",
+        "endedAt" : "2026-01-15T10:00:06Z",
+        "durationMs" : 400,
+        "errorCode" : null
+      } ],
+      "llmCalls" : [ ],
+      "toolCalls" : [ {
+        "attempt" : 1,
+        "tool" : "crm.upsert",
+        "outcome" : "SUCCEEDED",
+        "errorCode" : null,
+        "latencyMs" : 120,
+        "at" : "2026-01-15T10:00:05.900Z"
+      } ],
+      "sideEffects" : [ {
+        "state" : "COMMITTED",
+        "idempotencyMode" : "NATIVE_KEY",
+        "ownerAttempt" : 1,
+        "externalRef" : "crm_42",
+        "updatedAt" : "2026-10-02T11:52:36.670654Z"
+      } ]
+    }, {
+      "nodeId" : "send_message",
+      "type" : "mcp",
+      "callIndex" : 0,
+      "phase" : "FORWARD",
+      "status" : "SUCCEEDED",
+      "attempts" : 1,
+      "retries" : 0,
+      "startedAt" : "2026-01-15T10:00:06.100Z",
+      "endedAt" : "2026-01-15T10:00:06.500Z",
+      "durationMs" : 400,
+      "errorCode" : null,
+      "attemptHistory" : [ {
+        "attempt" : 1,
+        "status" : "SUCCEEDED",
+        "startedAt" : "2026-01-15T10:00:06.100Z",
+        "endedAt" : "2026-01-15T10:00:06.500Z",
+        "durationMs" : 400,
+        "errorCode" : null
+      } ],
+      "llmCalls" : [ ],
+      "toolCalls" : [ {
+        "attempt" : 1,
+        "tool" : "messaging.send",
+        "outcome" : "SUCCEEDED",
+        "errorCode" : null,
+        "latencyMs" : 200,
+        "at" : "2026-01-15T10:00:06.400Z"
+      } ],
+      "sideEffects" : [ {
+        "state" : "COMMITTED",
+        "idempotencyMode" : "NONE",
+        "ownerAttempt" : 1,
+        "externalRef" : null,
+        "updatedAt" : "2026-10-02T11:52:36.671251Z"
+      } ]
+    } ]
+  },
+  "error" : null,
+  "meta" : { }
+}

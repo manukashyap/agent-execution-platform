@@ -55,12 +55,6 @@ public class ExecutionController {
         throw notImplemented("preview");
     }
 
-    @GetMapping("/trace")
-    @RequiresScope(RequiresScope.EXECUTIONS_READ)
-    public ApiEnvelope<Void> trace(@PathVariable UUID executionId) {
-        throw notImplemented("trace");
-    }
-
     private static NonRetryableError notImplemented(String what) {
         return new NonRetryableError(ErrorCodes.NOT_IMPLEMENTED, what + " is not available yet");
     }

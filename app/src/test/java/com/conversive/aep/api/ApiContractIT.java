@@ -190,11 +190,10 @@ class ApiContractIT extends PostgresIntegrationTest {
     }
 
     @Test
-    void previewAndTraceAreNotImplementedYet() throws Exception {
+    void previewIsNotImplementedYet() throws Exception {
         call(get("/v1/executions/" + UUID.randomUUID() + "/preview"), key)
                 .andExpect(status().isNotImplemented())
                 .andExpect(jsonPath("$.error.code").value("NOT_IMPLEMENTED"));
-        call(get("/v1/executions/" + UUID.randomUUID() + "/trace"), key).andExpect(status().isNotImplemented());
     }
 
     @Test
