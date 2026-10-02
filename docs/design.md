@@ -6,7 +6,9 @@ Java 21 / Spring Boot 3 / Temporal / Postgres. Status key: ✅ built and demonst
 
 ## 1. High-level architecture ✅
 
-One deployable Spring Boot app (`api`, `worker` roles by profile) plus a `mocks` service; Temporal provides durable execution; Postgres holds queryable state. Diagram: `docs/architecture.svg` (drawn in P10); fallback below.
+One deployable Spring Boot app (`api`, `worker` roles by profile) plus a `mocks` service; Temporal provides durable execution; Postgres holds queryable state. Diagram below (`docs/architecture.svg`); a Mermaid fallback follows.
+
+![Architecture](architecture.svg)
 
 ```mermaid
 flowchart LR
