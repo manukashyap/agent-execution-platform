@@ -321,7 +321,7 @@ Each cut = one README line + its design-doc section, committed as `docs: cut <it
 | P7 | D2·5 | 0.75 | ☐ | ☐ | |
 | P8 | D2·6 | 0.50 | ☐ | ☐ | |
 | P9 ★ | D2·7 | 1.00 | ☐ | ☐ | |
-| P10 ★ | D2·8 | 1.00 | ☐ | ☐ Release DoD | |
+| P10 ★ | D2·8 | 1.00 | 🟡 | ☐ Release DoD | T10.2 `docs/architecture.svg` ✅; T10.4 `WorkflowReplayIT` (2 recorded histories) ✅; design.pdf, README, fresh-clone check pending |
 | **Total** | | **16.00** | | | |
 
 ---
