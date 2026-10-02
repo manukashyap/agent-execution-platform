@@ -1,218 +1,168 @@
-# Design Document: Agent Execution Platform
+**Agent Execution Platform: Design Document**
 
-Java 21 / Spring Boot 3 / Temporal / Postgres. Status key: ✅ built and demonstrated · 🟡 built slice, rest designed · 📄 design only. Source of truth for scope: `docs/06-execution-plan.md`. Page budget: 5 A4 pages (sections 1-2 = p1, 3 = p2, 4-6 = p3, 7-10 = p4, 11-13 = p5).
+Java 21, Spring Boot 3, Temporal, Postgres 16. Status tags: **[B]** built and demonstrated, **[P]** built slice, rest designed, **[D]** design only. Scope source of truth: `docs/06-execution-plan.md`; deviations: `docs/ai-usage.md`.
 
-<!-- PAGE 1 -->
+## 1. High-level architecture [B]
 
-## 1. High-level architecture ✅
+One Spring Boot app (`api` and `worker` roles by profile) plus a `mocks` service (LLMs, vLLM, CRM, payments, MCP tools). Temporal provides durable execution; Postgres holds queryable state. Source: `docs/architecture.svg`.
 
-One deployable Spring Boot app (`api`, `worker` roles by profile) plus a `mocks` service; Temporal provides durable execution; Postgres holds queryable state. Diagram below (`docs/architecture.svg`); a Mermaid fallback follows.
+![](architecture.png){width=92%}
 
-![Architecture](architecture.svg)
+- **Temporal owns orchestration progress** (what completed, timers, retries, cancellation); **Postgres owns business state** (status, outputs, ledger, audit, cost), projected by activities.
+- **Enforced boundaries:** an ArchUnit rule keeps `engine.workflow` free of Spring, JDBC, `Instant.now`, `Random`, `Thread`. `common.http.OutboundClient` is the only egress; JDBC lives only in `*.persistence` packages.
+- **Tenant is a key, not a resource:** 10,000 tenants rule out per-tenant namespaces or queues. The API is asynchronous: `POST .../executions` returns `202 {executionId}`.
 
-```mermaid
-flowchart LR
-  C[Client] --> API[api: auth, rate limit, soft cap, idempotency]
-  API --> PG[(Postgres app DB)]
-  API -->|start exec:tenant:id| T[Temporal]
-  T --> W[DagInterpreterWorkflow]
-  W --> A[NodeActivity]
-  A --> N[Http / Llm / McpTool executors]
-  N --> R[router] & G[ToolGateway] & S[SideEffectGuard]
-  S --> PG
-  R & G & S --> X[LLM A / B / vLLM, MCP tools, CRM, payments: mocks]
-  A --> PG
-```
+## 2. Workflow execution model [B]
 
-- **Temporal owns orchestration progress** (what completed, timers, retries, cancellation). **Postgres owns business state** (status, outputs, ledger, audit, cost), projected by activities. Neither is derived from the other at read time.
-- **Enforced boundaries:** ArchUnit rule keeps `engine.workflow` free of Spring, JDBC, `Instant.now`, `Random`, `Thread`. `common.http.OutboundClient` is the only egress. Only `*.persistence` packages touch JDBC.
-- **Tenant is a key, not a resource.** 10,000 tenants rule out per-tenant namespaces or queues; every table and query carries `tenant_id`.
-- **Asynchronous API:** `POST /v1/workflows/{id}/executions` returns `202 {executionId}`; clients poll `GET /v1/executions/{id}` or `/trace`.
-- **Alternatives considered** (section 13): custom Postgres engine, DBOS, Conductor, Restate.
+- **One generic `DagInterpreterWorkflow` runs every customer DAG.** Its input is the *frozen* definition, so publishing v4 never changes a running v3 and replay stays deterministic. Replay is tested (`WorkflowReplayIT`, two committed histories).
+- **Definition** accepts the assignment JSON verbatim. Assumption: a node without `depends_on` depends on the previous node in list order; `depends_on: []` is an explicit root.
+- **Loop:** compute the ready set, run up to `maxParallel` (default 16, cap 100) activities with `Async.function`, wake on `Promise.anyOf`, repeat. Condition nodes evaluate in-workflow and mark untaken branches SKIPPED.
+- **`forEach`** answers "fan-out 100 in a 50-node DAG": items come from upstream output, one activity per item (`callIndex = i`), `maxConcurrency` bounded, more than 100 items fails `FANOUT_LIMIT`.
+- **Failure policy per node:** `FAIL_WORKFLOW` cancels siblings, waits for them to settle, then compensates; `CONTINUE` marks the node failed and skips its dependants.
+- **Payloads stay out of history:** activities write `node_output` and return a reference; a 500 node-execution cap bounds history to a few thousand events. StartToClose is the node timeout.
+- **Cancellation and deadline:** `DELETE /v1/executions/{id}` cancels the scope; the deadline is an in-workflow timer with Temporal's own timeout as a +1 h backstop.
+- **Versioning:** definition versions are immutable rows pinned at start; engine-code changes go through `Workflow.getVersion` (procedure documented, not yet needed). **Approval node** [D]: signal plus timer.
 
-## 2. Workflow execution model ✅
+## 3. Data model [B]
 
-- **One generic workflow type, `DagInterpreterWorkflow`, runs every customer DAG.** Input is the *frozen* definition, so a later publish of v4 never changes a running v3, and replay is deterministic.
-- **Definition** accepts the assignment's JSON verbatim (`workflow_id`, `version`, `nodes[{id,type,config}]`). Assumption: a node without `depends_on` depends on the previous node in list order; `depends_on: []` is an explicit root.
-- **Loop:** compute the ready set; run up to `maxParallel` (default 16, cap 100) activities with `Async.function`; wake on `Promise.anyOf`; repeat. Condition nodes evaluate in-workflow (pure) and mark untaken branches SKIPPED.
-- **`forEach`** is the answer to "fan-out 100 in a ≤ 50-node DAG": items resolved at runtime from upstream output, one activity per item (`callIndex = i`), `maxConcurrency` bounded, more than 100 items fails `FANOUT_LIMIT`.
-- **Failure policy per node:** `FAIL_WORKFLOW` cancels siblings, waits for them to settle, then compensates; `CONTINUE` marks the node failed and SKIPs its dependants.
-- **Per-node activity options:** StartToClose = node timeout; ScheduleToClose = timeout × (attempts + 1) + backoff; heartbeat 5 s on long nodes; side-effecting nodes use `WAIT_CANCELLATION_COMPLETED`.
-- **Payloads stay out of history:** activities write `node_output` and return a `NodeOutputRef`; outputs < 2 KB are inlined for conditions. 500 node executions per execution (default) bounds history to ~3k events, far under Temporal's 10k warning.
-- **Cancellation:** `DELETE /v1/executions/{id}` cancels the scope; the deadline is an in-workflow timer (Temporal's own timeout is +1 h as backstop).
-- **Versioning:** definition versions are immutable `(tenant, workflow, def_version)` rows pinned at start; engine-code changes use `Workflow.getVersion` (procedure documented, not needed in v1).
-- **Approval node** 📄: signal plus timer, default on timeout fails the branch. **Custom operators:** register a `NodeExecutor`.
-
-## 3. Data model ✅
-
-All tables carry `tenant_id`. Migrations: V1 core, V2 tools+ledger, V3 llm_call, V4 grants+audit, V5 budget.
+All tables carry `tenant_id`. Migrations V1 core, V2 tools and ledger, V3 `llm_call`, V4 grants and audit, V5 budget.
 
 | Table | Key | Purpose |
 |---|---|---|
-| `workflow_definition` | (tenant, workflow, def_version) | immutable spec JSONB + sha256 |
-| `workflow_execution` | id; UNIQUE(tenant, idempotency_key) | status, `row_version`, mode, `deadline_at`, `source_execution_id` (Run Again lineage) |
-| `node_run` | (execution, node, call_index, phase, attempt) | one row per attempt; `phase` FORWARD / COMPENSATE; error code, timings |
-| `node_output` | (execution, node, call_index, attempt) | payload JSONB + sha256; passed by reference |
-| `side_effect_ledger` | `effect_key` | state, `owner_attempt`, `lease_until`, `external_ref`, `response_ref` |
-| `tool_registry`, `tenant_tool_grant`, `tool_call_audit` | tool; (tenant, tool); one row per attempt | schema, scopes, reversibility, idempotency mode; args hashed |
+| `workflow_definition` | (tenant, workflow, version) | immutable spec JSONB + sha256 |
+| `workflow_execution` | id; UNIQUE(tenant, idempotency_key) | status, `row_version`, mode, `deadline_at`, Run Again lineage |
+| `node_run`, `node_output` | (execution, node, call_index, phase, attempt) | one row per attempt, phase FORWARD or COMPENSATE; payload by reference |
+| `side_effect_ledger` | `effect_key` | state, `owner_attempt`, `lease_until`, `external_ref`, `response` |
+| `tool_registry`, `tenant_tool_grant`, `tool_call_audit` | tool; (tenant, tool); per attempt | schema, scopes, reversibility, idempotency mode; args hashed |
 | `llm_call` | id | candidates, router reason, tokens, cost, latency, outcome |
-| `tenant`, `tenant_limits`, `api_key`, `tenant_budget`, `budget_reservation` | | admission, SHA-256 key hash, TCC |
+| `tenant`, `tenant_limits`, `api_key`, `tenant_budget`, `execution_budget`, `budget_reservation` | | admission, SHA-256 key hash, TCC |
 
-- **`EffectKey = sha256(tenant : exec : node : phase : callIndex)`**, computed in exactly one place; attempt number is deliberately excluded so every retry maps to the same ledger row.
-- **Retention:** `node_output` must outlive the execution (compensation args are read from it). Prod: month-partition `node_run`, `llm_call`, `tool_call_audit` 📄.
+**`EffectKey = sha256(tenant : exec : node : phase : callIndex)`**, computed in one place; the attempt number is deliberately excluded so every retry maps to the same ledger row. `node_output` must outlive the execution because compensation reads its arguments from it; month-partitioning `node_run`, `llm_call` and audit is [D].
 
-## 4. State management ✅
+## 4. State management [B]
 
-- **Execution status** `QUEUED → RUNNING → {SUCCEEDED · FAILED · CANCELLED · TIMED_OUT · COMPENSATING → COMPENSATED · COMPENSATION_FAILED · NEEDS_ATTENTION}`, plus `START_FAILED` for admission. Node status per phase: `PENDING → RUNNING → {SUCCEEDED · FAILED · SKIPPED · CANCELLED · NEEDS_ATTENTION}`. Ledger: `PENDING · COMMITTED · UNKNOWN · FAILED`.
-- **Single-writer transitions by compare-and-set:** `UPDATE … SET status=:to, row_version=row_version+1 WHERE id=:id AND status = ANY(:allowedFrom)`. Zero rows is an idempotent no-op, so a terminal state is never overwritten (tested with a 10-thread race). Isolation is READ COMMITTED, which re-evaluates `WHERE` on a locked row.
-- **No external call inside a DB transaction, ever.** Transaction boundaries on a side effect: (a) ledger PENDING insert, (b) external call, outside any tx, (c) ledger COMMITTED + `node_output`, (d) Temporal activity completion. A crash between (b) and (c) is the assignment's §8 scenario.
-- **Per-execution counters** (node executions, cost, tokens) live in workflow state; the workflow is their only writer, so no lock. Tenant-shared state (budget) uses TCC (section 7).
-- **Secrets** are resolved inside activities and never enter workflow input, history, prompts or `node_output`.
+- **Execution status:** `QUEUED, RUNNING, then SUCCEEDED / FAILED / CANCELLED / TIMED_OUT / COMPENSATING, COMPENSATED / COMPENSATION_FAILED / NEEDS_ATTENTION`, plus `START_FAILED` for a failed Temporal start (reconciled forward if the run actually started). Ledger: `PENDING, COMMITTED, UNKNOWN, FAILED`.
+- **Single-writer transitions by compare-and-set:** `UPDATE ... SET status=:to, row_version=row_version+1 WHERE id=:id AND status = ANY(:allowedFrom)`. Zero rows is an idempotent no-op, so a terminal state is never overwritten (tested with a 10-thread race).
+- **No external call inside a DB transaction.** Ledger PENDING insert (tx), external call (no tx), ledger COMMITTED + `node_output` (tx), activity completion. A crash between the call and the commit is the assignment's section 8 scenario.
+- **Counters** (node executions, tokens) live in workflow state, single writer; tenant-shared budget uses TCC (section 7). Secrets are resolved inside activities and never enter history, prompts or `node_output`.
 
-<!-- PAGE 2 -->
+## 5. Failure and retry semantics [B]
 
-## 5. Failure and retry semantics ✅/🟡
+**Guarantee.** Activities are *at-least-once*: a crash between "the external system committed" and "we recorded it" is indistinguishable from "the request never arrived", so exactly-once across external systems is impossible. We provide **at-least-once execution + stable idempotency keys + a side-effect ledger = effectively-once side effects**, with an explicit `UNKNOWN` state that is never blindly retried. "Rollback" is semantic compensation (ACD, not ACID): a refund is a new fact.
 
-**Guarantee.** Activities are *at-least-once*: a crash between "the external system committed" and "we recorded it" is indistinguishable from "the request never arrived", so exactly-once across external systems is impossible. We provide **at-least-once execution + stable idempotency keys + a side-effect ledger = effectively-once side effects**, with an explicit `UNKNOWN` state that is never blindly retried. We do not claim exactly-once, and "rollback" is semantic compensation (ACD, not ACID): a refund is a new fact, not an erased charge.
+**Taxonomy.** `RetryableError` (timeout, 5xx, 429 with `Retry-After` as `nextRetryDelay`) vs `NonRetryableError(code)` (4xx, validation, `FANOUT_LIMIT`, budget codes). Exponential backoff with jitter; `maxAttempts` at most 5, enforced by the validator.
 
-**Error taxonomy.** `RetryableError` (timeout, 5xx, 429 with `Retry-After` as `nextRetryDelay`) vs `NonRetryableError(code)` (4xx, validation, `FANOUT_LIMIT`, budget codes). Retries use exponential backoff with jitter, `maxAttempts` ≤ 5 enforced by the validator.
+**Timing contract** for a side-effecting call with StartToClose 10 s: `httpTimeout` = 9 s, so our client gives up before Temporal times the attempt out; `lease_until` = attempt start + StartToClose + 5 s. The provider may still succeed after we gave up, so that success is learned only by *reconciliation*.
 
-**Timing contract for a side-effecting call** (StartToClose 10 s): `httpTimeout = StartToClose − 1 s = 9 s`, so our client gives up before Temporal times the attempt out; `lease_until = now + StartToClose + 5 s = 15 s`. The API may still succeed server-side after we gave up, so that success is learned only by *reconciliation*, never from the original attempt.
+**`SideEffectGuard.run(effectKey, attempt, call)`.** Insert-or-read the ledger row. COMMITTED returns the stored response. PENDING with a live lease (any owner) throws retryable `EFFECT_IN_PROGRESS` with `nextRetryDelay = lease_until - now`. PENDING with an expired lease: CAS-take ownership, then reconcile by tool idempotency mode: **NATIVE_KEY** re-sends the same key and the provider returns the original result; **LOOKUP** queries by business key; **NONE** marks UNKNOWN and the node `NEEDS_ATTENTION` with no second call. Provider 409 "in progress" is retryable; 429 releases the row (provider did nothing); 5xx expires the lease; timeouts keep it. An unresolved outcome ends the execution `NEEDS_ATTENTION`, not FAILED or COMPENSATION_FAILED.
 
-**`SideEffectGuard.run(effectKey, attempt, call)`:** (1) `INSERT … ON CONFLICT DO NOTHING`, read the row. COMMITTED returns the stored response. PENDING with a live lease throws retryable `EFFECT_IN_PROGRESS` with `nextRetryDelay = lease_until − now`, so the retry lands *after* the lease instead of burning attempts. PENDING with an expired lease: CAS-take ownership on `owner_attempt`, then reconcile by tool idempotency mode, **NATIVE_KEY** (re-send same key; provider returns the original result), **LOOKUP** (query by business key), **NONE** (mark UNKNOWN, node `NEEDS_ATTENTION`, no second call). (2) Make the call. (3) Commit from PENDING or UNKNOWN.
+**Assignment section 9: node 4 calls an API that needs 15 s; node timeout is 10 s.**
 
-**Assignment §9: Node 4 calls an API that needs 15 s; node timeout is 10 s.**
-
-| Variation | Mechanism (NATIVE_KEY / LOOKUP / NONE where it differs) | Status |
+| Variation | Mechanism | Status |
 |---|---|---|
-| 15 s API vs 10 s timeout | Attempt 1 aborts at 9 s (`httpTimeout`), fails at 10 s. Attempt 2 sees PENDING with live lease → `EFFECT_IN_PROGRESS`, `nextRetryDelay` = time to 15 s. Lease expired → NATIVE_KEY re-call returns stored result (one charge, SUCCEEDED); LOOKUP finds it by business key; **NONE** makes no call, `NEEDS_ATTENTION`, Node 5 waits, parallel branches unaffected | ✅ tests 2, 3 |
-| Worker crash at 12 s | Heartbeat/StartToClose expires, Temporal reschedules on another worker; the workflow's state is in history. Same ledger path: PENDING with a lease up to 15 s → wait, then reconcile | ✅ crash test, scripted `lite` kill |
-| Network loss | Activity cannot report completion, attempt times out. Same path; the response is recovered via re-call (NATIVE_KEY) or lookup, never assumed | ✅ `/admin/drop-connection` |
-| Resume after 30 min | Replay from history; completed nodes are not re-run (their outputs are in `node_output`). Deadline timer and budgets still apply. Compensations past `valid_for_s` escalate | 📄 |
-| Customer clicks Run Again | New POST, new `Idempotency-Key`, new `execution_id`, so new EffectKeys: new effects *by design*. Optional `business_key` dedupe (e.g. charge order #123 once) | 📄 |
-| New version deployed mid-run | In-flight run keeps its frozen v3; new executions pin v4. Interpreter code changes go through `getVersion` | ✅ test |
-| Rate-limited API (429) | Retryable with `Retry-After` as `nextRetryDelay`; counts toward `maxAttempts` (≤ 5) so it cannot loop forever; per-provider buckets stop us hitting the limit in the first place | ✅ script |
+| 15 s API vs 10 s timeout | Attempt 1 aborts at 9 s, fails at 10 s. Attempt 2 sees a live lease, waits via `EFFECT_IN_PROGRESS`. After expiry: NATIVE_KEY re-call returns the stored result (one charge); LOOKUP finds it; **NONE** makes no call, `NEEDS_ATTENTION`; parallel branches are unaffected | [B] `SideEffectEngineIT` (scaled), `failure-walkthrough.sh` (full size) |
+| Worker crash at 12 s | StartToClose expires, Temporal reschedules; the crash lands in the lease wait, then the same reconcile path | [B] walkthrough kill test |
+| Network loss | Attempt cannot report, times out; same path; outcome recovered via re-call or lookup, never assumed | [B] mock `/admin/drop-connection` |
+| Resume after 30 min | Replay from history; completed nodes not re-run (outputs in `node_output`); deadline and budgets still apply | [D] |
+| Run Again | New POST, new key, new `execution_id`, so new EffectKeys: new effects by design; optional `business_key` dedupe | [D] |
+| New version mid-run | In-flight run keeps frozen v3; new executions pin v4; interpreter changes via `getVersion` | [B] test |
+| Rate-limited API (429) | Retryable, `Retry-After` as `nextRetryDelay`, counts toward `maxAttempts`; per-provider token buckets avoid the limit | [B] script |
 
-**Saga / compensation 🟡.** Registry declares reversibility (`COMPENSATABLE · PIVOT · RETRIABLE · READ_ONLY`); the safe shape is `compensatable* → pivot → retriable*` (validator warns otherwise). On `FAIL_WORKFLOW`, cancel or deadline: cancel the in-flight scope and **wait** for it to settle, then reconcile-then-compensate every compensatable node that has a ledger row, in reverse completion order (always a valid reverse topological order), inside a detached cancellation scope. An UNKNOWN forward effect is never compensated blindly; an executed pivot ends in `COMPENSATION_FAILED` plus audit. Diamond/parallel compensation ordering is design-only (`setParallelCompensation` is rejected as it ignores dependencies).
+**Saga [P].** The registry declares reversibility (`COMPENSATABLE, PIVOT, RETRIABLE, READ_ONLY`). On failure, cancel or deadline the interpreter cancels in-flight work, waits for it to settle, then reconciles-then-compensates every compensatable node with a ledger row in reverse completion order, in a detached scope. An UNKNOWN forward effect is never compensated blindly; an executed pivot ends `COMPENSATION_FAILED` plus audit. Diamond-aware parallel compensation is [D].
 
-<!-- PAGE 3 -->
+## 6. Scaling strategy [P]
 
-## 6. Scaling strategy 🟡
-
-**Capacity math (assignment §3):**
-
-| Quantity | Figure |
+| Quantity (assignment section 3) | Figure |
 |---|---|
-| Average load | 1 M exec/day ≈ 12 exec/s, trivial; peak sizes the system |
-| Peak | 500 exec/s × 5–50 nodes = **2.5 k–25 k node executions/s** |
-| Temporal history events | ~6 per activity → 15 k–150 k events/s |
-| Orchestration-store writes | ≈ 50 k–150 k/s worst case, plus app-DB projection (`node_run`, `node_output`, ledger ≈ 3–4 rows per node) |
-| Availability | 99.95 % ≈ 22 min/month: HA Temporal + HA Postgres; API accepts work if workers lag |
+| Average load | 1 M exec/day is about 12 exec/s; the peak sizes the system |
+| Peak | 500 exec/s x 5-50 nodes = 2.5 k-25 k node executions/s |
+| Availability | 99.95 % is about 22 min/month: HA Temporal and Postgres; stateless workers scale out; API accepts if workers lag |
 
-- **First bottleneck: persistence write throughput of Temporal on Postgres**, not CPU. The prototype uses Postgres; one primary will not carry 25 k activities/s (third-party benchmarks: ~4.5 k state transitions/s at 2,048 shards). We measure the actual limit with k6 and report it below.
-- **10× plan:** Temporal Cloud or Cassandra-backed Temporal with 4 k+ history shards (fixed at cluster creation) and Elasticsearch visibility; split task queues/namespaces by tier; local activities for cheap nodes; pgbouncer. App DB: month-partition `node_run`/`llm_call`/audit, hash-shard by `tenant_id`, batch the projection writes, move hot tenant budget to sharded sub-counters or Redis.
-- **Stateless workers** scale horizontally; `api` and `worker` roles scale independently. Activities are idempotent so any worker may take any task.
-- **Fan-out:** 500 node executions per execution bounds history; a child workflow per `forEach` is the documented route beyond that.
-- **Load-test results** (k6 on `full`, one heavy + two light tenants, lead workflow with `forEach` of 10):
+**Load test** (`loadtest/RESULTS.md`, k6, `./loadtest/run.sh`): Apple M4, 10 cores, 16 GiB; Docker VM 10 CPUs / 7.65 GiB, everything on one node (app, mocks, one Postgres for app + Temporal, Temporal 1.32 with 4 shards). Workflow: http, llm via router, then `forEach` of 10 http calls (12 node runs). Heavy tenant ramped 5 to 160 exec/s over 6 min plus two light tenants at 5/s.
 
-<!-- RESULTS -->
+- **Sustained throughput: about 22 exec/s (about 270 node runs/s)**; best minute 26.7/s. Completions stopped tracking admissions at about 25-30/s. Unloaded (about 9.5/s): e2e p50 0.25 s, p95 0.7 s.
+- **First bottleneck: the Temporal server and its Postgres persistence**, not the app (about 1 core). At the knee Postgres used about 2.5 cores, Temporal 2.6, app 1.1. The backlog grew in the workflow-task queue (`queue_depth` peaked at 18 k) while admission stayed 100 % 2xx, p95 247 ms. 32 shards instead of 4 gave only about +10 %; the remaining limit (Postgres CPU, VM fsync or Temporal locking) is **not determined**.
+- **Writes per execution** (calibration, heap tuples): app DB 28 inserts + 19 updates; Temporal 81 + 71 + 43 deletes; visibility 1 + 3. About 85 + 125 + 8 commits and 215 KB WAL, so about 75 % of row writes are Temporal's own.
+- **Findings:** (1) **no backpressure**: with test limits raised, admission accepted everything while 4.5 k heavy executions timed out in queue (`ScheduleToStart`); with default limits the soft cap rejects earlier. (2) **Noisy neighbour**: light tenants sharing the queue were starved at this overload (about 480 of 1,751 completed); Temporal priority and fairness did not keep their latency flat, so fairness is **not claimed**.
+- **500/s extrapolation (linear, not measured, optimistic):** about 56 Postgres cores, 59 Temporal cores, 24 app cores, 107 MB/s WAL, about 108 k commits/s. Not reachable on one node.
+- **10x plan (about 220/s):** (1) own Postgres or Cassandra / Temporal Cloud for Temporal; **visibility on Elasticsearch** (largest single statement cost); (2) split Temporal into frontend, history, matching, worker services; 512 shards; (3) fewer events per run: batch or local activities for small `forEach`, child workflow for large; (4) fewer app writes: batch projections per ready set, per-tenant admission counter, shard the hot `tenant_budget` row; (5) **backpressure** (429 on queue depth or schedule-to-start) and dedicated task queues per tier; (6) separate API and worker deployments, larger Hikari pool (pending reached 16).
 
-## 7. Multi-tenancy and cost controls 🟡
+## 7. Multi-tenancy and cost controls [P]
 
-- **Isolation:** tenant derived from the API key (SHA-256 hash lookup), another tenant's resource returns 404, every query filters `tenant_id`, metrics carry `tenant_tier` not `tenant_id` (10 k tenants would blow up cardinality).
-- **Admission (built):** idempotency check first (a retried POST consumes no token, slot or budget) → per-tenant token bucket (`429 RATE_LIMITED` + `Retry-After`) → soft concurrency cap (`429 CONCURRENCY_LIMIT`). The cap is a derived count, `count(*) WHERE tenant_id=? AND status IN ('QUEUED','RUNNING') AND deadline_at > now()`, with no lock; overshoot is bounded by the number of concurrent admitters and tested. A row lock was rejected: it would serialise a busy tenant at a few hundred admissions/s.
-- **Temporal Priority and Fairness** (fairness key = tenant, weight = tier) gives approximate dispatch fairness. It is not a quota and degrades with 10 k keys, so quotas and caps stay in our layer. Claimed only if verified on `full`.
-- **"Tenant A submits 100,000 executions" 📄.** Production design: accept up to a backlog cap (e.g. 10 k) into `execution_queue` (202), reject the rest with 429; a dispatcher drains it with **deficit round-robin** over per-tenant backlogs (`FOR UPDATE SKIP LOCKED`, weighted by tier) up to A's concurrency cap, so B and C get their share every round and A's backlog is visible as `queue_depth{tenant_tier}`. The **prototype implements the rejecting variant** (429 + `Retry-After`), which pushes back on the client instead of storing the burst; the README states this.
-- **Test ("admission isolation"):** A floods at 10× its limit; B's admissions all succeed; A's rejects are 429 with `Retry-After`.
-- **Budgets, TCC:** per LLM/tool call `try` (conditional `UPDATE … WHERE spent+reserved+est ≤ limit RETURNING`) → `confirm` (from RESERVED or CANCELLED, so a late confirm after cancel still records spend) → `cancel`. 50 concurrent reservations against a budget for 10 yield exactly 10.
+- **Isolation:** tenant derived from the API key hash; another tenant's resource returns 404; metrics carry `tenant_tier`, never `tenant_id`.
+- **Admission [B]:** idempotency check first (a retried POST consumes nothing) then per-tenant token bucket (`429 RATE_LIMITED` + `Retry-After`) then soft concurrency cap (`429 CONCURRENCY_LIMIT`), a lock-free derived count whose overshoot is bounded by concurrent admitters. The bucket is in-memory per replica.
+- **Temporal priority and fairness key** (tenant, tier weight) is set on every start but is only a dispatch hint: load test showed it does not isolate tenants under overload. Quotas and caps stay in our layer.
+- **"Tenant A submits 100,000 executions" [D].** Accept up to a backlog cap into `execution_queue` (202), reject the rest with 429; a dispatcher drains it by **deficit round-robin** over per-tenant backlogs (`FOR UPDATE SKIP LOCKED`, tier-weighted) up to A's cap, so B and C get their share each round. **The prototype implements only the rejecting variant** (429 + `Retry-After`); admission isolation is tested (A floods at 10x its limit, B is unaffected).
+- **Budgets, TCC [B]:** per LLM call `try` (conditional `UPDATE ... WHERE spent+reserved+est <= limit`) then `confirm` (a late confirm after cancel still records spend) or `cancel`; a reaper cancels RESERVED rows older than 15 min. 50 concurrent reservations against a budget for 10 yield exactly 10.
 
-**Limit × enforcement layer (assignment §11):**
-
-| Limit | Layer | Code on breach |
+| Limit (assignment section 11) | Layer | Code |
 |---|---|---|
-| Max cost | activity TCC reservation + workflow counter | `BUDGET_EXCEEDED` |
-| Max tokens | workflow counter (fed by activity results) | `TOKEN_BUDGET_EXCEEDED` |
-| Max time | in-workflow deadline timer (+1 h Temporal backstop) | `TIMED_OUT` |
+| Max cost | TCC reservation per execution and tenant | `BUDGET_EXCEEDED` |
+| Max tokens | workflow counter | `TOKEN_BUDGET_EXCEEDED` |
+| Max time | in-workflow deadline timer | `TIMED_OUT` |
 | Max node executions | workflow counter, default 500 | `NODE_EXEC_LIMIT` |
-| Max retries | validator cap `maxAttempts` ≤ 5 | validation error |
-| Max fan-out | validator (static ≤ 100) + runtime `forEach` check | `FANOUT_LIMIT` |
-| Tool rounds | `maxToolCalls` ≤ 3 in the `llm` node | `TOOL_CALL_LIMIT` |
+| Max retries | validator, `maxAttempts` at most 5 | validation error |
+| Max fan-out | validator (static 100) + runtime check | `FANOUT_LIMIT` |
+| Tool rounds | `maxToolCalls` 1-3 in `llm` node | `TOOL_CALL_LIMIT` |
 
-Unbounded-loop sources are named and closed: fan-out, retries, the agent tool loop, and self-triggering (the SSRF deny-list blocks the platform's own host). Dry-run executions get a lower default `maxCostUsd`.
+Unbounded-loop sources (fan-out, retries, tool loop, self-triggering via the SSRF deny-list) are closed. Dry-run gets a lower default cost cap (0.50 USD).
 
-<!-- PAGE 4 -->
+## 8. AI / LLM routing [B]
 
-## 8. AI / LLM routing ✅
+- **Pipeline:** filter (capability, state not OPEN, per-provider token bucket) then score `cost / latency / errRate` with weights by priority (HIGH latency-heavy, NORMAL cost-leaning, LOW cost-heavy; DEGRADED adds a penalty) then up to 2 fallbacks sharing the node's attempt budget. Every decision is stored in `llm_call` (`seq`, `reason`).
+- **Providers (assignment section 5):** A 200 ms / $0.010 / 100 RPS, B 500 ms / $0.004 / 500 RPS, vLLM 100 ms / $0.002 / 200 RPS. When vLLM's bucket is empty, NORMAL/LOW spill to B and HIGH to A. vLLM has no tool-calling capability, so tool turns go to A/B.
+- **Health state machine** (10 s windows, 6-window lookback, windows under 20 samples ignored so an idle provider cannot flap): HEALTHY to DEGRADED on p95 > 2 s in 2 consecutive windows; any to OPEN on error rate > 50 % or p95 > 5 s; OPEN to HALF_OPEN after 30 s; HALF_OPEN to HEALTHY after 10 probes with at most 2 failures, else OPEN; DEGRADED to HEALTHY after 3 windows with p95 <= 1.5 s. A DEGRADED provider keeps a deterministic 5 % probe share, which makes recovery observable (needs at least 40 req/s total).
+- **vLLM p95 > 2 s, measured** (`vllm-degradation.sh`, +3 s latency, about 55 req/s): DEGRADED about **26 s** after the latency change, HEALTHY about **46 s** after it was restored. Router state is in-memory per instance; sharing it via Redis is [D].
 
-- **Pipeline:** filter (capability, tenant allow-list, state ≠ OPEN, per-provider token bucket) → score `cost / p95 / errRate` with weights by priority (HIGH latency-heavy, NORMAL balanced, LOW cost-heavy; DEGRADED adds a penalty) → fallback to at most 2 more providers, sharing the node's attempt budget. Every decision is persisted in `llm_call.candidates` and `reason`.
-- **Providers (assignment §5):** A 200 ms / $0.010 / 100 RPS · B 500 ms / $0.004 / 500 RPS · vLLM 100 ms / $0.002 / 200 RPS. **Spill:** when vLLM's bucket is empty, NORMAL/LOW go to B and HIGH goes to A.
-- **Health state machine** (10 s windows, 6-window lookback; windows with < 20 samples are ignored so an idle provider cannot flap):
+## 9. MCP and tool execution [B]
 
-| From | To | Condition |
-|---|---|---|
-| HEALTHY | DEGRADED | p95 > 2 s in 2 consecutive qualifying windows (detection ≈ 20 s) |
-| any | OPEN | error rate > 50 % or p95 > 5 s in a qualifying window |
-| OPEN | HALF_OPEN | after 30 s |
-| HALF_OPEN | HEALTHY / OPEN | after 10 probe calls, by outcome |
-| DEGRADED | HEALTHY | p95 ≤ 1.5 s in 3 consecutive qualifying windows (hysteresis) |
-| DEGRADED | n/a | always gets a deterministic 5 % probe share (every 20th eligible request), which is what makes recovery observable |
+- **Registry:** each tool has JSON input/output schema, scopes, timeout, retry, `reversibility`, `idempotency` (NATIVE_KEY, LOOKUP, NONE) and a compensation tool. `GET /v1/tools` lists a tenant's grants; transport to the mocks service is JSON-RPC 2.0 `tools/list` and `tools/call` through `OutboundClient`.
+- **`ToolGateway.invoke`:** grant and scope check, JSON-schema validation (non-retryable), `SideEffectGuard` (side-effecting only), call, audit (one `tool_call_audit` row per attempt, args hashed).
+- **AI-selected tools:** an `llm` node with `tools` runs a bounded round in one activity (default 1 call, cap 3). **Only READ_ONLY tools may be offered**; side-effecting tools stay fixed `mcp` nodes so the saga and ledger see every effect. Enforced at runtime (`TOOL_FORBIDDEN`); a static validator rule is [D].
+- **Auth boundary:** per-tenant tool credentials live in the gateway, injected per call; they never appear in definitions, prompts, audit or `node_output`. Agents propose, the platform executes.
 
-- **vLLM p95 > 2 s scenario:** traffic shifts to B/A within ~20 s, vLLM keeps 5 % probes, and returns after 3 clean windows. Demo: `vllm-degradation.sh`, mock `/admin/latency`.
-- **Router state is in-memory per instance** in the prototype; sharing windows and buckets across instances (Redis) is 📄.
-
-## 9. MCP and tool execution ✅
-
-- **Registry:** each tool has JSON input/output schema, scopes, timeout, retry, `reversibility`, `idempotency` (NATIVE_KEY / LOOKUP / NONE), compensation. Discovery: `GET /v1/tools`; transport to the `mocks` service is **JSON-RPC 2.0 `tools/list` + `tools/call`** through `OutboundClient`. The registry can tighten what an untrusted server declares, never loosen it.
-- **`ToolGateway.invoke` order:** grant and scope check → JSON-schema validation (non-retryable on failure) → `SideEffectGuard` (side-effecting only) → call → audit. One `tool_call_audit` row per attempt, args hashed.
-- **AI-selected tools:** an `llm` node with `tools: [...]` runs a bounded round inside one activity (LLM → `tool_call` → gateway → LLM with result), default 1 call, cap 3. **Only READ_ONLY tools may be AI-selected**; side-effecting tools stay fixed `mcp` nodes so the saga and ledger see every effect. The validator rejects anything else.
-- **AuthN/Z boundary:** per-tenant tool credentials live in the gateway and are injected per call; they never appear in definitions, prompts or `node_output`. Agents propose, the platform executes.
-- **Failures:** transport/5xx retryable; 4xx/validation non-retryable; missing scope `TOOL_FORBIDDEN`; timeout retried, behind the ledger when side-effecting.
-
-## 10. Dry-run and replay ✅/📄
+## 10. Dry-run and replay [P]
 
 | Node | Default in `DRY_RUN` | Override |
 |---|---|---|
-| `llm` | live (budgeted, tagged `mode=DRY_RUN`) | `dryRun.mockLlm=true` |
-| tool with `reversibility=READ_ONLY` | live | `dryRun.allowReadOnly=false` |
-| `http` declared `side_effecting:false` | live | `allowReadOnly=false` |
-| everything else: side-effecting, compensations, **unclassified http** | **mocked** | none |
+| `llm` | live (budgeted, tagged) | `dryRun.mockLlm=true` |
+| tool `READ_ONLY`, `http` declared `side_effecting:false` | live | `allowReadOnly=false` |
+| side-effecting, compensations, **unclassified http** | **mocked** | none |
 
-- **Deny by default:** a node is live only if positively classified read-only; `OutboundClient` also refuses non-allow-listed hosts when mode ≠ LIVE, so an unflagged POST cannot leak through. This matches the assignment's example (Fetch Leads and LLM live; CRM Update and Send Message mocked).
-- **Code reuse:** same interpreter, activities, templating, validation, router, budgets; only `ExecutorRegistry.resolve(type, mode)` differs. Mock outputs come from the tool's `dryRunExample` / output schema, seeded `hash(workflowId, defVersion, nodeId, inputHash)`.
-- **Preview** (`GET /v1/executions/{id}/preview`): outputs, the list of mocked calls with rendered requests, and the compensation plan.
-- **Determinism:** with `mockLlm=true` the same workflow and input give an identical preview (tested). With live LLMs it does not, by nature. **`REPLAY` mode 📄** (stretch): serve recorded `node_output` / `llm_call` keyed by `(node, requestHash)`, with Temporal's `WorkflowReplayer` covering orchestration determinism.
+- **Deny by default:** a node is live only if positively classified read-only; `OutboundClient` also refuses non-allow-listed hosts outside LIVE mode. This matches the assignment example (fetch and LLM live, CRM update and send mocked), demonstrated by `dry-run.sh`.
+- **Reuse:** same interpreter, router and budgets; only `ExecutorRegistry.resolve(type, mode)` differs; mock outputs come from the tool's `dryRunExample` or schema.
+- **Preview** (`GET /v1/executions/{id}/preview`): outputs, mocked calls with rendered requests, compensation plan. With `mockLlm=true` the same input gives an identical preview (tested).
+- **`REPLAY` mode [D]** (returns `NOT_IMPLEMENTED`): serve recorded `node_output` / `llm_call` by `(node, requestHash)`. Orchestration determinism is already covered by `WorkflowReplayer` tests.
 
-## 11. Observability ✅
+## 11. Observability [B]
 
-- **Nine required metrics** (Micrometer → `/actuator/prometheus`): workflow latency histogram, executions by status (success rate), node latency, `llm_latency_seconds`, `llm_tokens_total{direction}`, `llm_cost_usd_total`, `node_retries_total`, `queue_depth`, `provider_errors_total`. Plus `compensations_total{outcome}`, `router_decisions_total{provider,reason}`, `side_effect_unknown_total`.
-- **Labels:** `tenant_tier`, `workflow_id`, `node_type`, `provider`, `model`; **never `tenant_id`**. Per-tenant questions go to `/trace` and SQL on `node_run` / `llm_call`.
-- **`queue_depth`** = Temporal schedule-to-start latency (+ `DescribeTaskQueue` backlog if supported) + `count(QUEUED)` at admission.
-- **End-to-end trace (assignment §12 "or equivalent"):** `GET /v1/executions/{id}/trace` joins `node_run`, `llm_call`, `tool_call_audit` into a timeline: per node start/end, attempts, error code, provider and router reason, tokens, cost. It answers the four operator questions (why did it fail, why this provider, what did it cost, where is it stuck). OTel → Jaeger is stretch.
+- **Nine required metrics** (Micrometer, `/actuator/prometheus`): workflow latency, executions by status, node latency, `llm_latency_seconds`, `llm_tokens_total`, `llm_cost_usd_total`, `node_retries_total`, `queue_depth`, `provider_errors_total`; plus compensations, router decisions, `side_effect_unknown_total`, admission and budget rejections, `schedule_to_start`.
+- **Labels:** `tenant_tier`, `workflow_id`, `node_type`, `provider`, `model`; **never `tenant_id`**. `queue_depth{source}` is the Temporal task-queue backlog (workflow and activity) plus the QUEUED count at admission; it was the signal that exposed the missing backpressure.
+- **End-to-end trace** (assignment section 12, "or equivalent"): `GET /v1/executions/{id}/trace` joins `node_run`, `llm_call`, `tool_call_audit` and the ledger in one read-only transaction: per node timing, attempts, error code, provider and router reason, tokens, cost, side-effect state, plus budget totals. OTel to Jaeger is [D]. Committed sample (`docs/samples/trace-sample.json`), a 4-node run, 9 s, 5 attempts:
 
-<!-- TRACE SAMPLE -->
+| Node | Result | What the trace shows |
+|---|---|---|
+| `fetch_leads` (http) | SUCCEEDED, 2 attempts | attempt 1 `UPSTREAM_TIMEOUT` (2 s), attempt 2 ok (0.4 s) |
+| `classify_leads` (llm) | SUCCEEDED | `vllm` `best_score` FAILED, then `llm-b` `fallback_after_error`; 420 + 80 tokens, $0.002 |
+| `update_crm` (mcp) | SUCCEEDED | `crm.upsert`, ledger COMMITTED, NATIVE_KEY, `crm_42` |
+| `send_message` (mcp) | SUCCEEDED | `messaging.send`, ledger COMMITTED, NONE |
 
-<!-- PAGE 5 -->
+## 12. Security [P]
 
-## 12. Security 🟡
-
-- **SSRF:** `OutboundClient` denies private ranges, metadata IPs and the platform's own API host (self-trigger loops); only allow-listed mock hosts bypass it. Per-tenant allow-list 📄.
-- **Tenant scoping:** tenant from API key, `tenant_id` in every predicate (including `node_run`, `node_output`), cross-tenant access returns 404; Postgres row-level security as defence in depth 📄.
-- **Keys and secrets:** `api_key(key_hash PK, tenant_id, scopes)` stores SHA-256 only; no secrets in code, config, fixtures, history or logs; tool credentials held by the gateway.
-- **Prompt injection via tool output:** tool results are data, not instructions. Containment is structural: AI may only call READ_ONLY tools on the node's allow-list, args are schema-validated and scope-checked, the call count is capped, and side-effecting tools are unreachable from an LLM. Pivot calls proposed by agents would be staged and policy-checked 📄.
-- **Injection and eval:** templates are non-executable (no SpEL); condition expressions use a sandboxed evaluator; error envelopes never leak internals; audit rows redact args.
+- **SSRF:** `OutboundClient` denies private ranges, metadata IPs and the platform's own host; only allow-listed mock hosts bypass. Known gap: the HTTP client re-resolves DNS on connect, so IP pinning against rebinding is [D], as are per-tenant allow-lists.
+- **Tenant scoping:** tenant from the API key; `tenant_id` in every predicate; cross-tenant access is 404. Postgres row-level security is [D].
+- **Keys and secrets:** `api_key.key_hash` stores SHA-256 only; no secrets in code, config, fixtures or history; tool credentials held by the gateway.
+- **Prompt injection via tool output:** tool results are data. Containment is structural: only READ_ONLY allow-listed tools are callable, args are schema-validated and scope-checked, rounds are capped, and tool output returns to the model marked `untrusted` behind a guard message and truncated. Side-effecting tools are unreachable from an LLM.
+- **Injection:** templates are non-executable; conditions use a restricted evaluator; error envelopes do not leak internals.
 
 ## 13. Trade-offs, alternatives and what we'd do with more time
 
 | Decision | Chosen | Alternative | Why |
 |---|---|---|---|
-| Orchestrator | **Temporal**, one generic interpreter workflow | Custom Postgres engine; DBOS Java; Conductor; Restate; Step Functions | Durable timers, retries, heartbeats, cancellation, replay come free; a custom engine rebuilds exactly where bugs hide, with the same single-writer ceiling. DBOS is the Postgres-only runner-up (≤ ~5k steps/s); Conductor wins for a user-editable server-side DSL. Hatchet has no Java SDK; Restate has no Postgres and BSL licensing |
-| Workflow granularity | One workflow per execution | Child workflow per node | Small history at ≤ 50 nodes; children only beyond `forEach` scale |
-| Admission over cap | Reject with 429 | DRR backlog | Pushes back on the client, avoids storing bursts; DRR is the production answer (section 7) |
-| Concurrency cap | Derived count, soft | Row lock / counter | A lock serialises a busy tenant; a counter leaks on abnormal termination |
-| Exactly-once | At-least-once + ledger | Claim exactly-once / 2PC | External APIs cannot join 2PC; claiming it would be false |
-| Trace | `/trace` from Postgres | OTel + Jaeger first | Meets the assignment's "equivalent"; answers per-tenant questions that metrics cannot |
-| Payloads | By reference in Postgres | Inline in history | 2 MB payload and 50 k-event limits |
-| LLM layer | Thin `LlmProvider` + own router | LangChain4j | The router logic is the deliverable |
-| Rate limiter | In-memory per instance | Redis | Prototype; Redis needed for multi-instance correctness |
+| Orchestrator | **Temporal**, one interpreter workflow | Custom Postgres engine; DBOS; Conductor; Restate | Durable timers, retries, heartbeats, cancellation, replay come free; a custom engine rebuilds where bugs hide. DBOS is the Postgres-only runner-up; the load test confirms Temporal's persistence cost is the price (section 6) |
+| Over-cap admission | Reject with 429 | DRR backlog | Pushes back on the client; DRR is the production answer |
+| Concurrency cap | Derived soft count | Row lock / counter | A lock serialises a busy tenant; the count is O(live set), so a per-tenant counter is the 10x step |
+| Exactly-once | At-least-once + ledger | 2PC | External APIs cannot join 2PC |
+| LLM layer | Thin provider + own router | LangChain4j | The router is the deliverable |
 
-**With more time:** (1) `REPLAY` mode and diamond-aware parallel compensation; (2) approval node (signal + timer); (3) DRR dispatcher and daily quotas; (4) Redis for limiter and router health, per tenant × provider buckets; (5) OTel → Jaeger and a Grafana dashboard; (6) Temporal fairness verified at 10 k keys; (7) row-level security, per-tenant egress allow-lists; (8) `EFFECT_KEY_CONFLICT` request-hash check and crash-during-compensation tests; (9) month-partitioned audit tables and a budget reaper; (10) resource leases with fencing tokens for two agents mutating one CRM record.
+**With more time:** (1) backpressure on queue depth and per-tier task queues (measured gap); (2) Temporal on its own DB with Elasticsearch visibility, re-run the load test; (3) DRR dispatcher and quotas; (4) `REPLAY` mode and diamond-aware compensation; (5) approval node; (6) Redis for limiter and router health; (7) OTel to Jaeger, Grafana; (8) row-level security, DNS pinning, per-tenant egress lists; (9) partitioned audit tables; (10) resource leases with fencing tokens for two agents mutating one CRM record.
