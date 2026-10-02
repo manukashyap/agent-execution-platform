@@ -1,0 +1,11 @@
+blks_hit | 10864988
+blks_read | 242432
+tup_deleted | 52
+tup_fetched | 100626
+tup_inserted | 25935
+tup_returned | 117733
+tup_updated | 24839
+wal_bytes (cluster) | 2930908675
+xact_commit | 99606
+table:executions_visibility:ins | 25727
+table:executions_visibility:upd | 24042

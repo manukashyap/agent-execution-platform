@@ -1,0 +1,5 @@
+minute_utc | heavy_done | light_done | completions_per_s
+14:08 | 27 | 58 | 1.4
+14:09 | 398 | 239 | 10.6
+14:10 | 64 | 65 | 2.2
+(3 rows)

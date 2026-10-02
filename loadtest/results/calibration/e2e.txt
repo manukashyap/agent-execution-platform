@@ -1,0 +1,5 @@
+tenant_id | status | n | p50_s | p95_s | p99_s | max_s
+lt_heavy | SUCCEEDED | 489 | 0.25 | 0.55 | 1.07 | 1.30
+lt_light1 | SUCCEEDED | 181 | 0.26 | 0.73 | 1.62 | 2.19
+lt_light2 | SUCCEEDED | 181 | 0.26 | 0.65 | 1.71 | 2.45
+(3 rows)

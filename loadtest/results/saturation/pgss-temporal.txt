@@ -1,0 +1,17 @@
+calls | total_ms | mean_ms | rows | query
+361945 | 13042 | 0.036 | 361945 | INSERT INTO history_node (shard_id, tree_id, branch_id, node_id, prev_txn_id, txn_id, data, data_encoding) VAL
+409656 | 10002 | 0.024 | 409656 | SELECT shard_id, namespace_id, workflow_id, run_id, create_request_id, state, status, start_time, last_write_v
+7256 | 9382 | 1.293 | 313231 | SELECT visibility_timestamp, task_id, data, data_encoding FROM timer_tasks WHERE shard_id = $1 AND ((visibilit
+409656 | 9159 | 0.022 | 409656 | SELECT db_record_version, next_event_id FROM executions WHERE shard_id = $1 AND namespace_id = $2 AND workflow
+409656 | 9045 | 0.022 | 409656 | UPDATE executions SET db_record_version = $1, next_event_id = $2, last_write_version = $3, data = $4, data_enc
+155621 | 8889 | 0.057 | 557699 | SELECT node_id, prev_txn_id, txn_id, data, data_encoding FROM history_node WHERE shard_id = $1 AND tree_id = $
+409656 | 6886 | 0.017 | 409656 | UPDATE current_executions SET run_id = $1, create_request_id = $2, state = $3, status = $4, start_time = $5, l
+1073 | 6831 | 6.366 | 100684 | DELETE FROM tasks_v2 WHERE range_hash = $1 AND task_queue_id = $2 AND task_id IN (SELECT task_id FROM tasks_v2
+168063 | 5375 | 0.032 | 168063 | INSERT INTO activity_info_maps (shard_id, namespace_id, workflow_id, run_id, schedule_id, data,data_encoding) 
+297684 | 5145 | 0.017 | 297684 | INSERT INTO timer_tasks (shard_id, visibility_timestamp, task_id, data, data_encoding) VALUES ($1, $2, $3, $4,
+435398 | 4383 | 0.010 | 435398 | SELECT range_id FROM shards WHERE shard_id = $1 FOR SHARE
+626046 | 2763 | 0.004 | 0 | BEGIN READ WRITE
+89376 | 2677 | 0.030 | 89376 | INSERT INTO tasks_v2 ( range_hash, task_queue_id, task_id, pass, data, data_encoding) VALUES ($1, $2, $3, $4, 
+15551 | 2564 | 0.165 | 155510 | INSERT INTO activity_info_maps (shard_id, namespace_id, workflow_id, run_id, schedule_id, data,data_encoding) 
+147848 | 2266 | 0.015 | 147848 | DELETE FROM activity_info_maps WHERE shard_id = $1 AND namespace_id = $2 AND workflow_id = $3 AND run_id = $4 
+(15 rows)
