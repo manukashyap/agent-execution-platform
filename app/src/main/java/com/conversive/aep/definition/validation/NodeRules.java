@@ -10,13 +10,18 @@ import com.conversive.aep.definition.model.NodeSpec;
 import com.conversive.aep.engine.workflow.condition.Condition;
 import com.conversive.aep.engine.workflow.condition.ConditionSyntaxException;
 import com.conversive.aep.engine.workflow.condition.ValuePath;
+import com.conversive.aep.sideeffect.TimingContract;
 import com.fasterxml.jackson.databind.JsonNode;
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
 /** Checks that only need one node (plus the graph for condition branches). */
 final class NodeRules {
+
+    /** PDF §9: attempt 1 times out, attempt 2 sees EFFECT_IN_PROGRESS, attempt 3 takes over the expired lease. */
+    static final int MIN_SIDE_EFFECT_ATTEMPTS = 3;
 
     static final Set<String> NODE_TYPES = Set.of("http", "llm", "mcp", "condition");
 
@@ -143,9 +148,14 @@ final class NodeRules {
         }
         Integer scheduleToClose = node.scheduleToCloseS();
         int startToClose = timeout == null ? props.defaultTimeoutS() : timeout;
-        if (scheduleToClose != null && scheduleToClose < startToClose + props.leaseGraceS()) {
-            out.error(SCHEDULE_TO_CLOSE_TOO_SHORT, node.id(), "schedule_to_close_s must be >= timeout_s ("
-                    + startToClose + ") + lease grace (" + props.leaseGraceS() + ")");
+        if (scheduleToClose == null || startToClose < 1) {
+            return; // an out-of-range timeout is already reported above
+        }
+        long floorS = TimingContract.minScheduleToClose(Duration.ofSeconds(startToClose)).toSeconds();
+        if (scheduleToClose < floorS) {
+            out.error(SCHEDULE_TO_CLOSE_TOO_SHORT, node.id(), "schedule_to_close_s must be >= " + floorS
+                    + " (timeout_s " + startToClose + " + lease " + TimingContract.lease(
+                    Duration.ofSeconds(startToClose)).toSeconds() + "), so an EFFECT_IN_PROGRESS retry still fits");
         }
     }
 
@@ -161,6 +171,10 @@ final class NodeRules {
         }
         if (retry.initialIntervalMs() != null && retry.initialIntervalMs() < 0) {
             out.error(RETRY_OUT_OF_RANGE, node.id(), "retry.initial_interval_ms must be >= 0");
+        }
+        if (attempts != null && attempts < MIN_SIDE_EFFECT_ATTEMPTS && NodeTraits.of(node, catalog).sideEffecting()) {
+            out.error(SIDE_EFFECT_NEEDS_THREE_ATTEMPTS, node.id(), "side-effecting nodes need retry.max_attempts >= "
+                    + MIN_SIDE_EFFECT_ATTEMPTS + " (timeout -> EFFECT_IN_PROGRESS -> takeover needs three attempts)");
         }
     }
 

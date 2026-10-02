@@ -22,6 +22,7 @@ public final class ValidationCodes {
     public static final String TIMEOUT_OUT_OF_RANGE = "TIMEOUT_OUT_OF_RANGE";
     public static final String RETRY_OUT_OF_RANGE = "RETRY_OUT_OF_RANGE";
     public static final String SCHEDULE_TO_CLOSE_TOO_SHORT = "SCHEDULE_TO_CLOSE_TOO_SHORT";
+    public static final String SIDE_EFFECT_NEEDS_THREE_ATTEMPTS = "SIDE_EFFECT_NEEDS_THREE_ATTEMPTS";
     public static final String LIMIT_ABOVE_CEILING = "LIMIT_ABOVE_CEILING";
     public static final String INVALID_LIMIT = "INVALID_LIMIT";
     public static final String COMPENSATE_WITHOUT_SIDE_EFFECT = "COMPENSATE_WITHOUT_SIDE_EFFECT";

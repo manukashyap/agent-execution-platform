@@ -5,6 +5,7 @@ import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.options
 import com.github.tomakehurst.wiremock.WireMockServer;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
@@ -12,6 +13,7 @@ import org.springframework.test.context.DynamicPropertySource;
  * Postgres plus one WireMock standing in for the mocks service: JSON-RPC {@code /mcp} and the three LLM providers at
  * {@code /llm/<provider>}. Shared by the P4 tool tests so they reuse a single Spring context.
  */
+@ActiveProfiles("dev")
 public abstract class WireMockToolsIntegrationTest extends PostgresIntegrationTest {
 
     /** Obviously fake; tests grep for it to prove the credential never leaks past the Authorization header. */

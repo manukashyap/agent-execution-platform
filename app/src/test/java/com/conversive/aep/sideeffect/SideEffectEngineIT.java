@@ -39,6 +39,7 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
@@ -51,6 +52,7 @@ import org.springframework.test.context.DynamicPropertySource;
  * gives up at 1 s and the lease ends 7 s after the attempt began. The run uses real time: the lease is computed from
  * the app clock, which Temporal's time-skipping cannot advance.
  */
+@ActiveProfiles("dev")
 @Import({InProcessTemporal.class, SideEffectEngineIT.CrashSwitchConfig.class})
 class SideEffectEngineIT extends PostgresIntegrationTest {
 

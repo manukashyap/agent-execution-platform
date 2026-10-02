@@ -21,6 +21,11 @@ final class NodeActivityOptions {
     /** Headroom on a compensation attempt for the reconciler's reads and the ledger writes between calls. */
     static final Duration COMPENSATION_SLACK = Duration.ofSeconds(10);
 
+    /** Far beyond any realistic outage; the run's own execution timeout is the real backstop. */
+    static final Duration STATE_SCHEDULE_TO_CLOSE = Duration.ofDays(7);
+
+    static final Duration STATE_MAX_RETRY_INTERVAL = Duration.ofSeconds(30);
+
     private static final Duration MIN_INTERVAL = Duration.ofMillis(1);
     private static final Duration MAX_INTERVAL = Duration.ofSeconds(60);
 
@@ -78,15 +83,19 @@ final class NodeActivityOptions {
                 .build();
     }
 
-    /** Engine state writes: short, retried quickly, bounded. */
+    /**
+     * Engine state writes (idempotent CAS / upserts): each attempt is short, but the call is retried with capped
+     * backoff for as long as the database stays down. A bounded ScheduleToClose would fail the workflow during a
+     * long outage and strand the {@code workflow_execution} row non-terminal, leaking its concurrency slot.
+     */
     static LocalActivityOptions state() {
         return LocalActivityOptions.newBuilder()
                 .setStartToCloseTimeout(Duration.ofSeconds(10))
-                .setScheduleToCloseTimeout(Duration.ofMinutes(2))
+                .setScheduleToCloseTimeout(STATE_SCHEDULE_TO_CLOSE)
                 .setRetryOptions(RetryOptions.newBuilder()
                         .setInitialInterval(Duration.ofMillis(200))
                         .setBackoffCoefficient(2.0)
-                        .setMaximumInterval(Duration.ofSeconds(10))
+                        .setMaximumInterval(STATE_MAX_RETRY_INTERVAL)
                         .build())
                 .build();
     }

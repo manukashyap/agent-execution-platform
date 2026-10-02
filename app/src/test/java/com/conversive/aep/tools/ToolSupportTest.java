@@ -1,10 +1,12 @@
 package com.conversive.aep.tools;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.conversive.aep.common.TenantId;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -15,14 +17,56 @@ class ToolSupportTest {
 
     @Test
     void credentialIsReadFromTheTenantAndToolSpecificVariableElseTheDevFallback() {
-        Map<String, String> env = Map.of("AEP_TOOL_CRED_T_DEV_PAYMENTS_CHARGE", "specific");
-        EnvToolCredentialProvider provider = new EnvToolCredentialProvider(env::get, "fallback");
+        String name = EnvToolCredentialProvider.variable(TenantId.of("t_dev"), "payments.charge");
+        Map<String, String> env = Map.of(name, "specific");
+        EnvToolCredentialProvider provider = new EnvToolCredentialProvider(env::get, "fallback", true);
 
         assertThat(provider.credential(TenantId.of("t_dev"), "payments.charge")).contains("specific");
         assertThat(provider.credential(TenantId.of("t_dev"), "crm.get")).contains("fallback");
-        assertThat(new EnvToolCredentialProvider(env::get, " ").credential(TenantId.of("t_x"), "crm.get")).isEmpty();
+        assertThat(new EnvToolCredentialProvider(env::get, " ", true).credential(TenantId.of("t_x"), "crm.get"))
+                .isEmpty();
+    }
+
+    @Test
+    void variableNamesAreHexOfUtf8TenantAndToolSoTheyCannotCollide() {
         assertThat(EnvToolCredentialProvider.variable(TenantId.of("t_dev"), "leads.fetch"))
-                .isEqualTo("AEP_TOOL_CRED_T_DEV_LEADS_FETCH");
+                .isEqualTo("AEP_TOOL_CRED_745F646576_6C656164732E6665746368");
+    }
+
+    @Test
+    void tenantsAndToolsThatNormalisedToTheSameNameNowResolveToDistinctVariables() {
+        List<String> names = List.of(
+                EnvToolCredentialProvider.variable(TenantId.of("acme-x"), "t"),
+                EnvToolCredentialProvider.variable(TenantId.of("acme_x"), "t"),
+                EnvToolCredentialProvider.variable(TenantId.of("ACME_X"), "t"),
+                EnvToolCredentialProvider.variable(TenantId.of("a"), "payments.charge"),
+                EnvToolCredentialProvider.variable(TenantId.of("a_payments"), "charge"));
+
+        assertThat(names).doesNotHaveDuplicates();
+    }
+
+    @Test
+    void devCredentialFallbackIsRefusedOutsideTheDevProfile() {
+        EnvToolCredentialProvider provider = new EnvToolCredentialProvider(k -> null, "shared", false);
+
+        assertThatThrownBy(() -> provider.credential(TenantId.of("t_a"), "crm.get"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("aep.tools.dev-credential")
+                .hasMessageContaining("dev profile");
+    }
+
+    @Test
+    void tenantSpecificCredentialStillWorksOutsideTheDevProfile() {
+        String name = EnvToolCredentialProvider.variable(TenantId.of("t_a"), "crm.get");
+        EnvToolCredentialProvider provider = new EnvToolCredentialProvider(Map.of(name, "own")::get, "shared", false);
+
+        assertThat(provider.credential(TenantId.of("t_a"), "crm.get")).contains("own");
+    }
+
+    @Test
+    void noCredentialAndNoFallbackIsEmptyOutsideTheDevProfile() {
+        assertThat(new EnvToolCredentialProvider(k -> null, "", false).credential(TenantId.of("t_a"), "crm.get"))
+                .isEmpty();
     }
 
     @Test

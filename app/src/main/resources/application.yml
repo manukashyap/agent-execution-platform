@@ -61,6 +61,12 @@ aep:
       start-backoff: 200ms
       retry-after: 5s
       run-timeout-slack: 1h
+    # moves RUNNING/COMPENSATING rows whose Temporal run already closed to a terminal status (stranded terminal CAS)
+    reconciler:
+      enabled: true
+      interval: 60s
+      min-age: 5m
+      batch-size: 100
   api:
     start-failed-retry-after-s: 5
   tools:

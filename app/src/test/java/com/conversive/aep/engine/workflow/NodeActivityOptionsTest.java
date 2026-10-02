@@ -8,6 +8,7 @@ import com.conversive.aep.definition.model.OnFailure;
 import com.conversive.aep.engine.activity.CompensationActivity;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import io.temporal.activity.ActivityOptions;
+import io.temporal.activity.LocalActivityOptions;
 import java.time.Duration;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -37,5 +38,15 @@ class NodeActivityOptionsTest {
         ActivityOptions options = NodeActivityOptions.forNode(sideEffectingNode(30));
 
         assertThat(options.getStartToCloseTimeout()).isEqualTo(Duration.ofSeconds(30));
+    }
+
+    @Test
+    void stateWritesOutlastALongDatabaseOutageWithCappedBackoff() {
+        LocalActivityOptions options = NodeActivityOptions.state();
+
+        assertThat(options.getScheduleToCloseTimeout()).isGreaterThanOrEqualTo(Duration.ofHours(1));
+        assertThat(options.getRetryOptions().getMaximumAttempts()).isZero();
+        assertThat(options.getRetryOptions().getMaximumInterval()).isLessThanOrEqualTo(Duration.ofSeconds(30));
+        assertThat(options.getStartToCloseTimeout()).isEqualTo(Duration.ofSeconds(10));
     }
 }

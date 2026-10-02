@@ -28,6 +28,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
@@ -35,6 +36,7 @@ import org.springframework.test.context.DynamicPropertySource;
  * A LOOKUP forward (crm.upsert) interrupted mid-call leaves a PENDING row; the saga must ask the provider
  * (crm.get) whether the effect landed and delete the contact, not assume it did not.
  */
+@ActiveProfiles("dev")
 @Import(InProcessTemporal.class)
 class CompensationLookupIT extends PostgresIntegrationTest {
 
@@ -100,7 +102,7 @@ class CompensationLookupIT extends PostgresIntegrationTest {
     void anInterruptedLookupForwardIsLookedUpAndItsContactDeleted() throws Exception {
         h.publish("""
                 {"workflow_id":"lk","version":1,"nodes":[
-                  {"id":"upsert","type":"mcp","timeout_s":2,"retry":{"max_attempts":1},
+                  {"id":"upsert","type":"mcp","timeout_s":2,"schedule_to_close_s":9,"retry":{"max_attempts":3,"initial_interval_ms":10000},
                    "config":{"tool":"crm.upsert","args":{"external_ref":"lead_9","name":"Ada","email":"a@example.com"}},
                    "compensate":{"type":"mcp","config":{"tool":"crm.delete","args":{"external_ref":"lead_9"}}}}
                   ]}
