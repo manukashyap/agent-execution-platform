@@ -70,6 +70,21 @@ public class CrmService implements Resettable {
         return Map.of("deleted", true);
     }
 
+    /** MCP {@code crm.delete} (crm.upsert's inverse): removes every contact with the ref; repeating it is a no-op. */
+    public Map<String, Object> deleteByExternalRef(String externalRef) {
+        controls.enter(DELETE_ROUTE);
+        List<String> ids = contacts.values().stream()
+                .filter(c -> c.request().externalRef().equals(externalRef))
+                .map(Contact::contactId)
+                .toList();
+        long removed = ids.stream().filter(id -> contacts.remove(id) != null).count();
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("external_ref", externalRef);
+        out.put("deleted", removed > 0);
+        out.put("deleted_count", removed);
+        return out;
+    }
+
     @Override
     public void reset() {
         contacts.clear();
