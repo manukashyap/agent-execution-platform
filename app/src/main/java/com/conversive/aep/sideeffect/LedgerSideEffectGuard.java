@@ -5,6 +5,7 @@ import com.conversive.aep.common.IdempotencyMode;
 import com.conversive.aep.common.NonRetryableError;
 import com.conversive.aep.common.RetryableError;
 import com.conversive.aep.common.http.UpstreamClientError;
+import com.conversive.aep.observability.AepMetrics;
 import com.conversive.aep.sideeffect.persistence.LedgerRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.time.Clock;
@@ -30,10 +31,12 @@ public class LedgerSideEffectGuard implements SideEffectGuard {
 
     private final LedgerRepository ledger;
     private final Clock clock;
+    private final AepMetrics metrics;
 
-    public LedgerSideEffectGuard(LedgerRepository ledger, Clock clock) {
+    public LedgerSideEffectGuard(LedgerRepository ledger, Clock clock, AepMetrics metrics) {
         this.ledger = ledger;
         this.clock = clock;
+        this.metrics = metrics;
     }
 
     @Override
@@ -81,8 +84,11 @@ public class LedgerSideEffectGuard implements SideEffectGuard {
 
     /** NONE: the earlier attempt may or may not have acted and nothing can tell; never call again. */
     private Optional<JsonNode> escalate(EffectSpec spec, LedgerEntry row, Instant now) {
-        if (row.state() == LedgerState.PENDING && !ledger.markUnknown(row, now)) {
-            return Optional.empty();
+        if (row.state() == LedgerState.PENDING) {
+            if (!ledger.markUnknown(row, now)) {
+                return Optional.empty();
+            }
+            metrics.sideEffectUnknown();
         }
         throw new NonRetryableError(ErrorCodes.NEEDS_ATTENTION,
                 "effect " + spec.key() + " has an unknown outcome and its tool has no idempotency support");

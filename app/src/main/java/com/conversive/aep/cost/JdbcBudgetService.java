@@ -7,6 +7,7 @@ import com.conversive.aep.common.TenantId;
 import com.conversive.aep.cost.persistence.BudgetRepository;
 import com.conversive.aep.cost.persistence.BudgetRepository.NewReservation;
 import com.conversive.aep.cost.persistence.BudgetRepository.Transition;
+import com.conversive.aep.observability.AepMetrics;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.Objects;
@@ -27,15 +28,20 @@ public class JdbcBudgetService implements BudgetService {
     private static final Logger log = LoggerFactory.getLogger(JdbcBudgetService.class);
     private static final int SCALE = 6;
     private static final String CONFIRMED_FROM_RESERVED = "RESERVED";
+    static final String REJECTED_EXECUTION_CAP = "execution_cap";
+    static final String REJECTED_TENANT_BUDGET = "tenant_budget";
 
     private final BudgetRepository repository;
     private final TransactionTemplate tx;
     private final CostProperties props;
+    private final AepMetrics metrics;
 
-    public JdbcBudgetService(BudgetRepository repository, TransactionTemplate tx, CostProperties props) {
+    public JdbcBudgetService(BudgetRepository repository, TransactionTemplate tx, CostProperties props,
+                             AepMetrics metrics) {
         this.repository = repository;
         this.tx = tx;
         this.props = props;
+        this.metrics = metrics;
     }
 
     @Override
@@ -90,6 +96,7 @@ public class JdbcBudgetService implements BudgetService {
                 return;
             }
         }
+        metrics.budgetRejected(tenantId, REJECTED_EXECUTION_CAP);
         throw new NonRetryableError(ErrorCodes.BUDGET_EXCEEDED,
                 "execution " + executionId + " has reached its cost limit (maxCostUsd)");
     }
@@ -104,6 +111,7 @@ public class JdbcBudgetService implements BudgetService {
                 return;
             }
         }
+        metrics.budgetRejected(tenantId, REJECTED_TENANT_BUDGET);
         throw new NonRetryableError(ErrorCodes.BUDGET_EXCEEDED, "tenant budget is exhausted");
     }
 

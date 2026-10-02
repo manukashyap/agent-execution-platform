@@ -5,6 +5,7 @@ import com.conversive.aep.common.NonRetryableError;
 import com.conversive.aep.common.RetryableError;
 import com.conversive.aep.cost.BudgetService;
 import com.conversive.aep.cost.Reservation;
+import com.conversive.aep.observability.AepMetrics;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -29,9 +30,10 @@ public class LlmRouter {
     private final RecentDecisions decisions;
     private final Duration noProviderRetryDelay;
     private final LongSupplier nanoTicker;
+    private final AepMetrics metrics;
 
     public LlmRouter(RoutePlanner planner, LlmProviderClient client, BudgetService budget, LlmCallRecorder recorder,
-            RecentDecisions decisions, Duration noProviderRetryDelay, LongSupplier nanoTicker) {
+            RecentDecisions decisions, Duration noProviderRetryDelay, LongSupplier nanoTicker, AepMetrics metrics) {
         this.planner = planner;
         this.client = client;
         this.budget = budget;
@@ -39,6 +41,7 @@ public class LlmRouter {
         this.decisions = decisions;
         this.noProviderRetryDelay = noProviderRetryDelay;
         this.nanoTicker = nanoTicker;
+        this.metrics = metrics;
     }
 
     private record Route(LlmRequest request, RoutePlan plan, List<LlmResponse.ProviderAttempt> attempts) {
@@ -81,6 +84,7 @@ public class LlmRouter {
     private LlmResponse callOnce(Route route, RoutePlan.Step step, String reason, Duration timeout) {
         ProviderRuntime provider = step.provider();
         decisions.record(provider.name(), reason);
+        metrics.routerDecision(provider.name(), reason);
         boolean outcomeRecorded = false;
         try {
             Reservation reservation = reserve(route, provider.config());
@@ -143,6 +147,8 @@ public class LlmRouter {
         recorder.record(new LlmCallRecord(r.tenantId(), r.executionId(), r.nodeId(), r.callIndex(), r.attempt(),
                 r.turn(), route.attempts().size(), provider.name(), provider.config().model(), r.priority(),
                 route.plan().candidates(), reason, promptTokens, completionTokens, cost, latencyMs, outcome, errorCode));
+        metrics.llmCall(r.tenantId(), provider.name(), provider.config().model(), promptTokens, completionTokens, cost,
+                Duration.ofMillis(latencyMs), errorCode);
         route.attempts().add(new LlmResponse.ProviderAttempt(provider.name(), reason, outcome, errorCode, latencyMs));
     }
 

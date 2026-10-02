@@ -76,6 +76,11 @@ aep:
     dev:
       dev-api-key: ${AEP_DEV_API_KEY:}
       other-api-key: ${AEP_DEV_OTHER_API_KEY:}
+  observability:
+    queue-depth:
+      enabled: true
+      refresh: 10s
+      describe-timeout: 2s
   cost:
     default-tenant-budget-usd: 100
     dry-run-max-cost-usd: 0.50

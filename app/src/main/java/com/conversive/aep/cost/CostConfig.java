@@ -1,6 +1,7 @@
 package com.conversive.aep.cost;
 
 import com.conversive.aep.cost.persistence.BudgetRepository;
+import com.conversive.aep.observability.AepMetrics;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
@@ -14,7 +15,7 @@ public class CostConfig {
     @Bean
     @Primary
     BudgetService jdbcBudgetService(BudgetRepository repository, PlatformTransactionManager transactionManager,
-                                    CostProperties props) {
-        return new JdbcBudgetService(repository, new TransactionTemplate(transactionManager), props);
+                                    CostProperties props, AepMetrics metrics) {
+        return new JdbcBudgetService(repository, new TransactionTemplate(transactionManager), props, metrics);
     }
 }

@@ -1,5 +1,6 @@
 package com.conversive.aep.tenancy;
 
+import com.conversive.aep.observability.AepMetrics;
 import com.conversive.aep.tenancy.persistence.LiveExecutionCounter;
 import com.conversive.aep.tenancy.persistence.TenantLimitsRepository;
 import com.conversive.aep.tenancy.persistence.TenantTierRepository;
@@ -21,9 +22,15 @@ public class TenancyConfig {
         return new TenantRateLimiter(System::nanoTime);
     }
 
+    /** Shared by the Temporal priority policy and the metrics' {@code tenant_tier} label. */
     @Bean
-    TemporalPriorityPolicy temporalPriorityPolicy(TenantTierRepository tiers, TenancyProperties props) {
-        return new TemporalPriorityPolicy(new CachedTenantTiers(tiers, props.limitsRefresh(), System::nanoTime));
+    CachedTenantTiers cachedTenantTiers(TenantTierRepository tiers, TenancyProperties props) {
+        return new CachedTenantTiers(tiers, props.limitsRefresh(), System::nanoTime);
+    }
+
+    @Bean
+    TemporalPriorityPolicy temporalPriorityPolicy(CachedTenantTiers tiers) {
+        return new TemporalPriorityPolicy(tiers);
     }
 
     /** Supersedes the P1 {@link AllowAllAdmissionControl}. */
@@ -31,7 +38,7 @@ public class TenancyConfig {
     @Primary
     AdmissionControl tokenBucketAdmissionControl(CachedTenantLimits limits, TenantRateLimiter rateLimiter,
                                                  LiveExecutionCounter liveExecutions, TenancyProperties props,
-                                                 Clock clock) {
-        return new TokenBucketAdmissionControl(limits, rateLimiter, liveExecutions, props, clock);
+                                                 Clock clock, AepMetrics metrics) {
+        return new TokenBucketAdmissionControl(limits, rateLimiter, liveExecutions, props, clock, metrics);
     }
 }

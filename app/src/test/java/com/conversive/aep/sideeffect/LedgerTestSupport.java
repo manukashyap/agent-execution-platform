@@ -25,6 +25,9 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
+import com.conversive.aep.observability.AepMetrics;
+import com.conversive.aep.tenancy.TenantTier;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 /** Shared fixture: real Postgres ledger, real {@link OutboundClient}, WireMock provider, test-controlled clock. */
 abstract class LedgerTestSupport extends PostgresIntegrationTest {
@@ -41,6 +44,7 @@ abstract class LedgerTestSupport extends PostgresIntegrationTest {
     ObjectMapper mapper;
 
     MutableClock clock;
+    SimpleMeterRegistry meters;
     LedgerSideEffectGuard guard;
     OutboundClient client;
     ExecutionId execution;
@@ -61,7 +65,8 @@ abstract class LedgerTestSupport extends PostgresIntegrationTest {
         wireMock.resetAll();
         PROVIDER.reset(Duration.ZERO);
         clock = new MutableClock(T0);
-        guard = new LedgerSideEffectGuard(ledger, clock);
+        meters = new SimpleMeterRegistry();
+        guard = new LedgerSideEffectGuard(ledger, clock, new AepMetrics(meters, tenant -> TenantTier.STANDARD));
         OutboundProperties properties = new OutboundProperties(
                 List.of("localhost:" + wireMock.port()), List.of(), Duration.ofSeconds(1));
         client = new OutboundClient(properties, mapper, Clock.systemUTC());

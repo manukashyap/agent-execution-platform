@@ -4,6 +4,7 @@ import com.conversive.aep.common.ErrorCodes;
 import com.conversive.aep.common.IdempotencyMode;
 import com.conversive.aep.common.NonRetryableError;
 import com.conversive.aep.common.RetryableError;
+import com.conversive.aep.observability.AepMetrics;
 import com.conversive.aep.sideeffect.EffectCall;
 import com.conversive.aep.sideeffect.EffectSpec;
 import com.conversive.aep.sideeffect.ProviderInFlightException;
@@ -42,38 +43,42 @@ public class McpToolGateway implements ToolGateway {
     private final McpClient mcp;
     private final ToolCredentialProvider credentials;
     private final ToolCallAudit audit;
+    private final AepMetrics metrics;
 
     public McpToolGateway(ToolAccess access, ToolArgsValidator validator, SideEffectGuard guard, McpClient mcp,
-                          ToolCredentialProvider credentials, ToolCallAudit audit) {
+                          ToolCredentialProvider credentials, ToolCallAudit audit, AepMetrics metrics) {
         this.access = access;
         this.validator = validator;
         this.guard = guard;
         this.mcp = mcp;
         this.credentials = credentials;
         this.audit = audit;
+        this.metrics = metrics;
     }
 
     @Override
     public JsonNode invoke(ToolInvocation inv) {
         long started = System.nanoTime();
         String effectKey = null;
+        String meteredTool = null;
         try {
             ToolDefinition tool = access.authorize(inv.tenantId(), inv.toolName());
+            meteredTool = tool.name();
             validator.validate(tool, inv.args());
             Duration stc = inv.startToCloseOr(tool.timeout());
             if (!tool.sideEffecting()) {
                 JsonNode result = direct(tool, inv, stc);
-                record(inv, ToolCallAudit.SUCCEEDED, null, started, null);
+                record(inv, meteredTool, ToolCallAudit.SUCCEEDED, null, started, null);
                 return result;
             }
             EffectSpec spec = EffectSpec.of(inv.tenantId(), inv.executionId(), inv.nodeId(), inv.phase(),
                     inv.callIndex(), inv.attempt(), tool.idempotency(), stc);
             effectKey = spec.key().value();
             JsonNode result = guard.run(spec, new GuardedCall(tool, inv, spec.httpTimeout()));
-            record(inv, ToolCallAudit.SUCCEEDED, null, started, effectKey);
+            record(inv, meteredTool, ToolCallAudit.SUCCEEDED, null, started, effectKey);
             return result;
         } catch (RuntimeException e) {
-            record(inv, outcome(e), code(e), started, effectKey);
+            record(inv, meteredTool, outcome(e), code(e), started, effectKey);
             throw e;
         }
     }
@@ -90,8 +95,12 @@ public class McpToolGateway implements ToolGateway {
         return mcp.callTool(toolName, args, key, credentials.credential(inv.tenantId(), toolName), timeout, inv.mode());
     }
 
-    private void record(ToolInvocation inv, String outcome, String errorCode, long startedNanos, String effectKey) {
-        long latencyMs = Duration.ofNanos(System.nanoTime() - startedNanos).toMillis();
+    /** {@code meteredTool} is null until the grant check passes, so a metric label never carries an unvetted name. */
+    private void record(ToolInvocation inv, String meteredTool, String outcome, String errorCode, long startedNanos,
+                        String effectKey) {
+        Duration latency = Duration.ofNanos(System.nanoTime() - startedNanos);
+        long latencyMs = latency.toMillis();
+        metrics.toolCall(inv.tenantId(), meteredTool, outcome, errorCode, latency);
         try {
             audit.record(new ToolCallAudit.Entry(inv.tenantId(), inv.executionId(), inv.nodeId(), inv.callIndex(),
                     inv.phase(), inv.attempt(), inv.toolName(), ArgsDigest.sha256(inv.args()), outcome, errorCode,
