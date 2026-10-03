@@ -1,0 +1,183 @@
+# Profiles: `lite` (Postgres + Temporal dev server + mocks), `full` (Temporal on Postgres, UI, Prometheus, Redis),
+# `app` (the platform container). Run one of lite/full, optionally with app:
+#   docker compose --profile lite --profile app up -d
+name: aep
+
+services:
+  postgres:
+    image: postgres:16
+    profiles: [lite, full]
+    environment:
+      POSTGRES_USER: aep
+      POSTGRES_PASSWORD: aep
+      POSTGRES_DB: aep
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aep -d aep"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  temporal:
+    image: temporalio/temporal:1.9.1
+    profiles: [lite]
+    # The image has no /data dir, so the named volume is root-owned; the dev server needs to write its SQLite file.
+    user: "0:0"
+    command:
+      - server
+      - start-dev
+      - --ip
+      - 0.0.0.0
+      - --db-filename
+      - /data/temporal.db
+      - --dynamic-config-value
+      - matching.enableFairness=true
+    ports:
+      - "7233:7233"
+      - "8233:8233"
+    volumes:
+      - temporal-data:/data
+    healthcheck:
+      test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "127.0.0.1:7233"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+
+  temporal-schema:
+    image: temporalio/admin-tools:1.32.0
+    profiles: [full]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SQL_PLUGIN: postgres12
+      SQL_HOST: postgres
+      SQL_PORT: "5432"
+      SQL_USER: aep
+      SQL_PASSWORD: aep
+    entrypoint: ["/bin/sh", "/deploy/setup-schema.sh"]
+    volumes:
+      - ./deploy/temporal:/deploy:ro
+
+  temporal-pg:
+    image: temporalio/server:1.32.0
+    profiles: [full]
+    depends_on:
+      temporal-schema:
+        condition: service_completed_successfully
+    environment:
+      DB: postgres12
+      DB_PORT: "5432"
+      POSTGRES_SEEDS: postgres
+      POSTGRES_USER: aep
+      POSTGRES_PWD: aep
+      DBNAME: temporal
+      VISIBILITY_DBNAME: temporal_visibility
+      DYNAMIC_CONFIG_FILE_PATH: /deploy/dynamicconfig.yaml
+      PROMETHEUS_ENDPOINT: 0.0.0.0:8000
+    ports:
+      - "7233:7233"
+    volumes:
+      - ./deploy/temporal:/deploy:ro
+    networks:
+      default:
+        aliases: [temporal]
+
+  temporal-namespace:
+    image: temporalio/admin-tools:1.32.0
+    profiles: [full]
+    depends_on:
+      - temporal-pg
+    environment:
+      TEMPORAL_ADDRESS: temporal-pg:7233
+    entrypoint: ["/bin/sh", "/deploy/create-namespace.sh"]
+    volumes:
+      - ./deploy/temporal:/deploy:ro
+
+  temporal-ui:
+    image: temporalio/ui:2.55.0
+    profiles: [full]
+    depends_on:
+      temporal-namespace:
+        condition: service_completed_successfully
+    environment:
+      TEMPORAL_ADDRESS: temporal-pg:7233
+    ports:
+      - "8080:8080"
+
+  prometheus:
+    image: prom/prometheus:v3.13.4
+    profiles: [full]
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+
+  redis:
+    image: redis:7-alpine
+    profiles: [full]
+    ports:
+      - "6379:6379"
+
+  mocks:
+    build:
+      context: .
+      args:
+        MODULE: mocks
+    image: aep-mocks:dev
+    profiles: [lite, full]
+    environment:
+      SERVER_PORT: "8090"
+    ports:
+      - "8090:8090"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8090/actuator/health"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  app:
+    build:
+      context: .
+      args:
+        MODULE: app
+    image: aep-app:dev
+    profiles: [app]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mocks:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+        required: false
+      temporal-namespace:
+        condition: service_completed_successfully
+        required: false
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      SPRING_DOCKER_COMPOSE_ENABLED: "false"
+      AEP_DB_URL: jdbc:postgresql://postgres:5432/aep
+      AEP_TEMPORAL_TARGET: temporal:7233
+      AEP_OUTBOUND_ALLOW_HOSTS: mocks:8090
+      AEP_MOCKS_BASE_URL: http://mocks:8090
+      AEP_LLM_A_URL: http://mocks:8090/llm/llm-a
+      AEP_LLM_B_URL: http://mocks:8090/llm/llm-b
+      AEP_VLLM_URL: http://mocks:8090/llm/vllm
+      AEP_OUTBOUND_SELF_HOSTS: app:8000,localhost:8000
+      AEP_DEV_API_KEY: ${AEP_DEV_API_KEY:-aep-dev-key-t_dev}
+      AEP_DEV_OTHER_API_KEY: ${AEP_DEV_OTHER_API_KEY:-aep-dev-key-t_other}
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/actuator/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 40
+
+volumes:
+  pgdata:
+  temporal-data:

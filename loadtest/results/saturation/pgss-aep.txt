@@ -1,0 +1,17 @@
+calls | total_ms | mean_ms | rows | query
+25741 | 52108 | 2.024 | 25741 | SELECT count(*) FROM workflow_execution WHERE tenant_id = $1 AND status IN ($3, $4) AND deadline_at > $2
+15542 | 13601 | 0.875 | 15542 | UPDATE tenant_budget SET reserved_usd = GREATEST(reserved_usd - $1, $4), spent_usd = spent_usd + $2, updated_a
+147873 | 13049 | 0.088 | 147873 | INSERT INTO node_run (tenant_id, execution_id, node_id, call_index, phase, attempt, status, started_at) VALUES
+147873 | 10623 | 0.072 | 147873 | INSERT INTO node_output (tenant_id, execution_id, node_id, call_index, attempt, payload, sha256) VALUES ($1, $
+147873 | 6625 | 0.045 | 147873 | UPDATE node_run SET status = $1, error_code = $2, error_message = $3, ended_at = $4 WHERE tenant_id = $5 AND e
+25741 | 5283 | 0.205 | 25741 | INSERT INTO workflow_execution (id, tenant_id, workflow_id, def_version, mode, status, priority, idempotency_k
+116786 | 4418 | 0.038 | 233572 | SELECT node_id, call_index, payload::text AS payload FROM node_output WHERE tenant_id = $1 AND execution_id = 
+295746 | 3112 | 0.011 | 295746 | SELECT $2 FROM ONLY "public"."workflow_execution" x WHERE "id" OPERATOR(pg_catalog.=) $1 FOR KEY SHARE OF x
+186850 | 2797 | 0.015 | 186850 | SELECT id, tenant_id, workflow_id, def_version, mode, status, priority, row_version, idempotency_key, input::t
+147873 | 2791 | 0.019 | 0 | UPDATE node_run SET status = $10, error_code = $1, error_message = $2, ended_at = $3 WHERE tenant_id = $4 AND 
+60 | 2434 | 40.566 | 60 | SELECT count(*) FROM workflow_execution WHERE tenant_id LIKE $1 AND status IN ($2,$3)
+67 | 2225 | 33.202 | 67 | SELECT count(*) FROM workflow_execution WHERE status = $1
+15545 | 1845 | 0.119 | 15545 | UPDATE workflow_execution SET status = $1, row_version = row_version + $14, updated_at = $2, started_at = CASE
+15542 | 1812 | 0.117 | 15542 | UPDATE tenant_budget SET reserved_usd = reserved_usd + $1, updated_at = now() WHERE tenant_id = $2 AND spent_u
+15542 | 1569 | 0.101 | 15542 | INSERT INTO llm_call (tenant_id, execution_id, node_id, call_index, attempt, turn, seq, provider, model, prior
+(15 rows)

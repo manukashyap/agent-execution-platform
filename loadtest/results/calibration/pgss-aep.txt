@@ -1,0 +1,17 @@
+calls | total_ms | mean_ms | rows | query
+10212 | 802 | 0.079 | 10212 | INSERT INTO node_run (tenant_id, execution_id, node_id, call_index, phase, attempt, status, started_at) VALUES
+10212 | 653 | 0.064 | 10212 | INSERT INTO node_output (tenant_id, execution_id, node_id, call_index, attempt, payload, sha256) VALUES ($1, $
+10212 | 415 | 0.041 | 10212 | UPDATE node_run SET status = $1, error_code = $2, error_message = $3, ended_at = $4 WHERE tenant_id = $5 AND e
+8510 | 215 | 0.025 | 17020 | SELECT node_id, call_index, payload::text AS payload FROM node_output WHERE tenant_id = $1 AND execution_id = 
+20424 | 173 | 0.008 | 20424 | SELECT $2 FROM ONLY "public"."workflow_execution" x WHERE "id" OPERATOR(pg_catalog.=) $1 FOR KEY SHARE OF x
+11914 | 155 | 0.013 | 11914 | SELECT id, tenant_id, workflow_id, def_version, mode, status, priority, row_version, idempotency_key, input::t
+851 | 146 | 0.172 | 851 | INSERT INTO workflow_execution (id, tenant_id, workflow_id, def_version, mode, status, priority, idempotency_k
+10212 | 119 | 0.012 | 0 | UPDATE node_run SET status = $10, error_code = $1, error_message = $2, ended_at = $3 WHERE tenant_id = $4 AND 
+851 | 112 | 0.132 | 851 | WITH prev AS ( SELECT id, status, amount_usd, execution_id FROM budget_reservation WHERE tenant_id = $1 AND id
+851 | 89 | 0.104 | 851 | UPDATE workflow_execution SET status = $1, row_version = row_version + $14, updated_at = $2, started_at = CASE
+851 | 80 | 0.094 | 851 | UPDATE workflow_execution SET status = $1, row_version = row_version + $15, updated_at = $2, started_at = CASE
+1702 | 76 | 0.045 | 851 | UPDATE execution_budget SET reserved_usd = reserved_usd + $1 WHERE tenant_id = $2 AND execution_id = $3 AND sp
+851 | 64 | 0.075 | 851 | INSERT INTO execution_budget (tenant_id, execution_id, limit_usd) SELECT $1, $2, CASE WHEN s.explicit IS NOT N
+851 | 53 | 0.063 | 851 | INSERT INTO llm_call (tenant_id, execution_id, node_id, call_index, attempt, turn, seq, provider, model, prior
+851 | 43 | 0.051 | 851 | INSERT INTO budget_reservation (id, tenant_id, execution_id, node_id, call_index, ref, amount_usd) VALUES ($1,
+(15 rows)

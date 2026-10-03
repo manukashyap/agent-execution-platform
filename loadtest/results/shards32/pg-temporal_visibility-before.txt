@@ -1,0 +1,25 @@
+?column? | xact_commit
+blks_hit | 74747
+blks_read | 62
+deadlocks | 0
+temp_bytes | 0
+tup_deleted | 1039
+tup_fetched | 121787
+tup_inserted | 3479
+tup_returned | 124231
+tup_updated | 668
+wal_bytes (cluster) | 21094768
+xact_commit | 268
+xact_rollback | 0
+(12 rows)
+?column? | n_tup_ins
+table:executions_visibility:del | 0
+table:executions_visibility:ins | 2
+table:executions_visibility:upd | 0
+table:schema_update_history:del | 0
+table:schema_update_history:ins | 16
+table:schema_update_history:upd | 0
+table:schema_version:del | 0
+table:schema_version:ins | 1
+table:schema_version:upd | 15
+(9 rows)

@@ -1,0 +1,15 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: aep-app
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["app:8000"]
+  - job_name: aep-mocks
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["mocks:8090"]
+  - job_name: temporal
+    static_configs:
+      - targets: ["temporal-pg:8000"]

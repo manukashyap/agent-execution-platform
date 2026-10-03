@@ -1,0 +1,17 @@
+calls | total_ms | mean_ms | rows | query
+25727 | 152225 | 5.917 | 25727 | SELECT count(*) FROM workflow_execution WHERE tenant_id = $1 AND status IN ($3, $4) AND deadline_at > $2
+8037 | 13572 | 1.689 | 8037 | UPDATE tenant_budget SET reserved_usd = GREATEST(reserved_usd - $1, $4), spent_usd = spent_usd + $2, updated_a
+94974 | 12569 | 0.132 | 94974 | INSERT INTO node_run (tenant_id, execution_id, node_id, call_index, phase, attempt, status, started_at) VALUES
+94965 | 12243 | 0.129 | 94965 | INSERT INTO node_output (tenant_id, execution_id, node_id, call_index, attempt, payload, sha256) VALUES ($1, $
+25727 | 9477 | 0.368 | 25727 | INSERT INTO workflow_execution (id, tenant_id, workflow_id, def_version, mode, status, priority, idempotency_k
+94964 | 7518 | 0.079 | 94964 | UPDATE node_run SET status = $1, error_code = $2, error_message = $3, ended_at = $4 WHERE tenant_id = $5 AND e
+8043 | 5560 | 0.691 | 8043 | UPDATE tenant_budget SET reserved_usd = reserved_usd + $1, updated_at = now() WHERE tenant_id = $2 AND spent_u
+78885 | 4313 | 0.055 | 157770 | SELECT node_id, call_index, payload::text AS payload FROM node_output WHERE tenant_id = $1 AND execution_id = 
+128634 | 3832 | 0.030 | 128634 | SELECT id, tenant_id, workflow_id, def_version, mode, status, priority, row_version, idempotency_key, input::t
+189939 | 3246 | 0.017 | 189939 | SELECT $2 FROM ONLY "public"."workflow_execution" x WHERE "id" OPERATOR(pg_catalog.=) $1 FOR KEY SHARE OF x
+94974 | 2372 | 0.025 | 0 | UPDATE node_run SET status = $10, error_code = $1, error_message = $2, ended_at = $3 WHERE tenant_id = $4 AND 
+8043 | 1362 | 0.169 | 8043 | INSERT INTO execution_budget (tenant_id, execution_id, limit_usd) SELECT $1, $2, CASE WHEN s.explicit IS NOT N
+8037 | 1360 | 0.169 | 8037 | WITH prev AS ( SELECT id, status, amount_usd, execution_id FROM budget_reservation WHERE tenant_id = $1 AND id
+8049 | 1358 | 0.169 | 8049 | UPDATE workflow_execution SET status = $1, row_version = row_version + $14, updated_at = $2, started_at = CASE
+7725 | 1355 | 0.175 | 7725 | UPDATE workflow_execution SET status = $1, row_version = row_version + $15, updated_at = $2, started_at = CASE
+(15 rows)

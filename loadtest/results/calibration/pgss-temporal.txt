@@ -1,0 +1,17 @@
+calls | total_ms | mean_ms | rows | query
+18490 | 565 | 0.031 | 18490 | INSERT INTO history_node (shard_id, tree_id, branch_id, node_id, prev_txn_id, txn_id, data, data_encoding) VAL
+23961 | 369 | 0.015 | 23961 | SELECT shard_id, namespace_id, workflow_id, run_id, create_request_id, state, status, start_time, last_write_v
+23961 | 343 | 0.014 | 23961 | UPDATE executions SET db_record_version = $1, next_event_id = $2, last_write_version = $3, data = $4, data_enc
+645 | 335 | 0.520 | 16009 | SELECT visibility_timestamp, task_id, data, data_encoding FROM timer_tasks WHERE shard_id = $1 AND ((visibilit
+23961 | 292 | 0.012 | 23961 | SELECT db_record_version, next_event_id FROM executions WHERE shard_id = $1 AND namespace_id = $2 AND workflow
+23961 | 291 | 0.012 | 23961 | UPDATE current_executions SET run_id = $1, create_request_id = $2, state = $3, status = $4, start_time = $5, l
+14155 | 269 | 0.019 | 14155 | INSERT INTO activity_info_maps (shard_id, namespace_id, workflow_id, run_id, schedule_id, data,data_encoding) 
+24812 | 239 | 0.010 | 24812 | SELECT range_id FROM shards WHERE shard_id = $1 FOR SHARE
+16447 | 212 | 0.013 | 16447 | INSERT INTO timer_tasks (shard_id, visibility_timestamp, task_id, data, data_encoding) VALUES ($1, $2, $3, $4,
+28639 | 120 | 0.004 | 0 | BEGIN READ WRITE
+10212 | 107 | 0.010 | 10212 | DELETE FROM activity_info_maps WHERE shard_id = $1 AND namespace_id = $2 AND workflow_id = $3 AND run_id = $4 
+851 | 105 | 0.123 | 8510 | INSERT INTO activity_info_maps (shard_id, namespace_id, workflow_id, run_id, schedule_id, data,data_encoding) 
+3896 | 92 | 0.024 | 17639 | SELECT node_id, prev_txn_id, txn_id, data, data_encoding FROM history_node WHERE shard_id = $1 AND tree_id = $
+2407 | 87 | 0.036 | 2407 | INSERT INTO tasks_v2 ( range_hash, task_queue_id, task_id, pass, data, data_encoding) VALUES ($1, $2, $3, $4, 
+4747 | 64 | 0.014 | 4747 | INSERT INTO transfer_tasks(shard_id, task_id, data, data_encoding) VALUES($1, $2, $3, $4)
+(15 rows)

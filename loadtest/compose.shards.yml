@@ -1,0 +1,6 @@
+# Experiment overlay: Temporal history shards (fixed at cluster creation; the stock image default is 4).
+# EXTRA_COMPOSE=loadtest/compose.shards.yml ./loadtest/run.sh   (fresh volumes: ./loadtest/run.sh down first)
+services:
+  temporal-pg:
+    environment:
+      NUM_HISTORY_SHARDS: "${NUM_HISTORY_SHARDS:-32}"

@@ -1,0 +1,136 @@
+spring:
+  application:
+    name: aep
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: ${AEP_DB_URL:jdbc:postgresql://localhost:5432/aep}
+    username: ${AEP_DB_USER:aep}
+    password: ${AEP_DB_PASSWORD:aep}
+  flyway:
+    locations: classpath:db/migration
+  docker:
+    compose:
+      enabled: true
+      file: compose.yml
+      lifecycle-management: start-only
+      profiles:
+        active: lite
+      skip:
+        in-tests: true
+
+server:
+  port: ${AEP_PORT:8000}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+aep:
+  temporal:
+    target: ${AEP_TEMPORAL_TARGET:localhost:7233}
+    namespace: ${AEP_TEMPORAL_NAMESPACE:default}
+    task-queue: ${AEP_TEMPORAL_TASK_QUEUE:aep-main}
+    start-worker: true
+  outbound:
+    connect-timeout: 2s
+    # ~200 activity slots x fan-out; every compose/bootRun target is one route
+    max-conn-total: ${AEP_OUTBOUND_MAX_CONN_TOTAL:400}
+    max-conn-per-route: ${AEP_OUTBOUND_MAX_CONN_PER_ROUTE:200}
+    connection-request-timeout: 1s
+    max-response-bytes: ${AEP_OUTBOUND_MAX_RESPONSE_BYTES:10485760}
+    allow-hosts: ${AEP_OUTBOUND_ALLOW_HOSTS:localhost:8090,mocks:8090}
+    self-hosts: ${AEP_OUTBOUND_SELF_HOSTS:localhost:8000,app:8000}
+  definition:
+    max-nodes: 50
+    max-width: 100
+    min-timeout-s: 1
+    max-timeout-s: 300
+    max-retry-attempts: 5
+    lease-grace-s: 5
+    default-timeout-s: 30
+    default-retry-attempts: 3
+    default-initial-interval-ms: 1000
+    default-max-parallel: 16
+    default-for-each-concurrency: 16
+  engine:
+    launcher:
+      start-attempts: 3
+      start-backoff: 200ms
+      retry-after: 5s
+      run-timeout-slack: 1h
+    # moves RUNNING/COMPENSATING rows whose Temporal run already closed to a terminal status (stranded terminal CAS)
+    reconciler:
+      enabled: true
+      interval: 60s
+      min-age: 5m
+      batch-size: 100
+  api:
+    start-failed-retry-after-s: 5
+  tools:
+    mcp-url: ${AEP_MOCKS_BASE_URL:http://localhost:8090}/mcp
+    dev-credential: ${AEP_TOOL_DEV_CREDENTIAL:}
+  tenancy:
+    # used only for tenants without a tenant_limits row; the row's rate_per_sec / burst / max_concurrent win
+    default-rate-per-sec: 10
+    default-burst: 20
+    default-max-concurrent: 50
+    limits-refresh: 30s
+    concurrency-retry-after: 5s
+    dev:
+      # seeded only under the dev profile (DevApiKeySeeder); same documented defaults as compose.yml
+      dev-api-key: ${AEP_DEV_API_KEY:aep-dev-key-t_dev}
+      other-api-key: ${AEP_DEV_OTHER_API_KEY:aep-dev-key-t_other}
+  observability:
+    queue-depth:
+      enabled: true
+      refresh: 10s
+      describe-timeout: 2s
+  cost:
+    default-tenant-budget-usd: 100
+    dry-run-max-cost-usd: 0.50
+    fallback-execution-max-cost-usd: 5
+    # releases RESERVED rows whose call died before confirm/cancel
+    reaper:
+      enabled: true
+      interval: 60s
+      max-age: 15m
+      batch-size: 100
+  router:
+    # cost is USD per 1,000 tokens (prompt + completion); rps = token-bucket capacity and refill per second
+    providers:
+      llm-a:
+        base-url: ${AEP_LLM_A_URL:http://localhost:8090/llm/llm-a}
+        model: model-a
+        nominal-latency: 200ms
+        cost-per-thousand-tokens-usd: 0.010
+        rps: 100
+        capabilities: [chat, tools, json]
+      llm-b:
+        base-url: ${AEP_LLM_B_URL:http://localhost:8090/llm/llm-b}
+        model: model-b
+        nominal-latency: 500ms
+        cost-per-thousand-tokens-usd: 0.004
+        rps: 500
+        capabilities: [chat, tools, json]
+      vllm:
+        base-url: ${AEP_VLLM_URL:http://localhost:8090/llm/vllm}
+        model: vllm-default
+        nominal-latency: 100ms
+        cost-per-thousand-tokens-usd: 0.002
+        rps: 200
+        capabilities: [chat, json]
+    spill:
+      from: vllm
+      high-to: llm-a
+      default-to: llm-b
+    no-provider-retry-delay: 1s
+    # tenant-allow-list:
+    #   "[t_other]": [llm-b, vllm]   # tenants not listed may use every provider
